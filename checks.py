@@ -1,10 +1,11 @@
-"""Numerical self-checks of the closed-form results used in kernel.py."""
+"""Numerical self-checks of the closed-form results used in kernel.py and cstr.py."""
 import time
 
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 
+import cstr
 from kernel import KRR, loo_grid_search
 
 
@@ -26,6 +27,10 @@ def run(Z, tz, sigma, lam, sigmas, lams, seed=0):
     brute = np.array([ts[i] - KRR(sigma, lam).fit(np.delete(Zs, i, 0), np.delete(ts, i))
                       .predict(Zs[i])[0] for i in range(len(Zs))])
     loo_dev = float(np.max(np.abs(brute - m.loo_residuals())))
+    # 2b. the eigen-decomposition shortcut used for tuning against the same residuals
+    i, j = int(np.argmin(np.abs(np.asarray(sigmas) - sigma))), int(np.argmin(np.abs(np.asarray(lams) - lam)))
+    grid = loo_grid_search(Zs, ts, [sigmas[i]], [lams[j]])[2][0, 0]
+    loo_grid_rel_dev = float(abs(grid - np.sqrt(np.mean(m.loo_residuals() ** 2))) / grid)
 
     # 3. variance from the KRR factorisation against a library Gaussian process
     gp = GaussianProcessRegressor(RBF(length_scale=sigma), alpha=lam, optimizer=None).fit(Zs, ts)
@@ -36,7 +41,7 @@ def run(Z, tz, sigma, lam, sigmas, lams, seed=0):
     sub = rng.choice(len(Z), size=min(1000, len(Z)), replace=False)
     t0 = time.perf_counter()
     loo_grid_search(Z[sub], tz[sub], sigmas, lams)
-    return {"gradient_max_rel_dev": worst, "loo_max_abs_dev": loo_dev,
+    return {"gradient_max_rel_dev": worst, "loo_max_abs_dev": loo_dev, "loo_grid_rel_dev": loo_grid_rel_dev,
             "variance_max_abs_dev": var_dev, "loo_grid_seconds": time.perf_counter() - t0,
             "loo_grid_size": int(len(sigmas) * len(lams)), "loo_grid_n": int(len(sub))}
 
@@ -53,3 +58,12 @@ def gradient_physical(model, X, seed=0, n=20):
         g = model.gradient(x)
         worst = max(worst, float(np.linalg.norm(fd - g) / np.linalg.norm(g)))
     return worst
+
+
+def saddle_node(p=cstr.CSTRParams(), h=1e-4):
+    """The stability limit from cstr.saddle_node satisfies both conditions of a saddle-node
+    point of the energy balance f(T, Tc) (Ca eliminated): f = 0 and df/dT = 0 (central
+    differences). Returns both residuals, in K/min."""
+    Tc, _, T = cstr.saddle_node(p)
+    f = lambda t: cstr._T_balance(t, Tc, p)[0]
+    return {"f": float(abs(f(T))), "df_dT": float(abs((f(T + h) - f(T - h)) / (2 * h)))}

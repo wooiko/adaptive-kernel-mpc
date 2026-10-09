@@ -1,6 +1,6 @@
 """Repeat the simulated experiments over many seeds and report the spread.
 
-    python run_seeds.py              # seeds 0-19, all CPU cores (about 37 minutes on 2 cores)
+    python run_seeds.py              # seeds 0-19, all CPU cores (about 50 minutes on 2 cores)
     python run_seeds.py --n 30
 
 Writes outputs/seeds.json and, if outputs/metrics.json exists (from run_demo.py),
@@ -29,11 +29,26 @@ def key_numbers(seed, cold_limit):
     krr = m["Kernel ridge"]["free_run_rmse"]
     w, a = ex["runs"]["Sliding window"], ex["runs"]["Static model"]
     hw, ha = hx["runs"]["Sliding window"], hx["runs"]["Static model"]
-    warn = [r["first_non_normal"] for r in (hw, ha) if r["first_non_normal"] is not None]
     below = hx["first_sample_below_startup_ca"]
+
+    def lag(r):
+        """First warning relative to Ca leaving the start-up range (negative = before); None if
+        no warning, or if the supervisor was already not normal before the hot input could be seen."""
+        ok = r["normal_before"] and r["first_non_normal"] is not None and below is not None
+        return r["first_non_normal"] - below if ok else None
+
     return {
         "seed": seed,
         "noise_ratio": st["noise_std_est"] / data.NOISE_STD,
+        "sigma": st["sigma"], "lam": st["lam"],
+        "tune_n_candidates": st["tuning"]["n_candidates_loo"], "tune_n_admissible": st["tuning"]["n_admissible"],
+        "tune_loo_min_free_run": st["tuning"]["loo_minimum"]["holdout_free_run_rmse"],
+        "tune_chosen_free_run": st["tuning"]["chosen"]["holdout_free_run_rmse"],
+        "tune_worst_candidate_free_run": st["tuning"]["holdout_free_run_rmse_range"][1],
+        "tune_best_candidate_free_run": st["tuning"]["holdout_free_run_rmse_range"][0],
+        "tune_chosen_over_best": (st["tuning"]["chosen"]["holdout_free_run_rmse"]
+                                  / st["tuning"]["holdout_free_run_rmse_range"][0]),
+        "lam_over_noise_var": st["lam"] / st["noise_var_normalised"],
         "krr_free_run": krr,
         "arx_free_run": m["ARX (linear, equation error)"]["free_run_rmse"],
         "oe_free_run": m["OE (linear, output error)"]["free_run_rmse"],
@@ -41,6 +56,8 @@ def key_numbers(seed, cold_limit):
         "oe_over_krr": m["OE (linear, output error)"]["free_run_rmse"] / krr,
         "svr_precision": sw["svr"]["precision"], "svr_recall": sw["svr"]["recall"],
         "svr_false_share": sw["svr"]["false_rejection_share"],
+        "svr_precision_final": sw["svr_final"]["precision"], "svr_recall_final": sw["svr_final"]["recall"],
+        "svr_false_share_final": sw["svr_final"]["false_rejection_share"],
         "median_precision": sw["median_causal"]["precision"], "median_recall": sw["median_causal"]["recall"],
         "filter_gain": f["one_step_rmse_without_filter"] / f["one_step_rmse_with_filter"],
         "drift_one_step_ratio": dr["Static model, no filter"]["rmse"] / dr["SVR filter + sliding window"]["rmse"],
@@ -48,11 +65,16 @@ def key_numbers(seed, cold_limit):
         "drift_adapt_effect_q4": (dr["Static model + SVR filter"]["free_run_by_quarter"][3]["rmse"]
                                   / dr["SVR filter + sliding window"]["free_run_by_quarter"][3]["rmse"]),
         "exc_window_nonnormal": sum(w["regime_share_outside"][1:]),
+        "exc_window_inside_nonnormal": sum(w["regime_share_inside"][1:]),
         "exc_window_lead_return": w["horizon"]["lead_before_return"],
+        "exc_max_lead": ex["max_lead"],
         "exc_window_back_to_normal": w["horizon"]["samples_to_normal_after_leaving"],
         "exc_static_nonnormal": sum(a["regime_share_outside"][1:]),
         "hot_var_before_over_th1": max(hw["var_h_before_ignition"], ha["var_h_before_ignition"]) / ex["th1"],
-        "hot_warning_lag": (min(warn) - below) if warn and below is not None else None,
+        "hot_warning_lag_window": lag(hw), "hot_warning_lag_static": lag(ha),
+        "hot_normal_before_window": hw["normal_before"], "hot_normal_before_static": ha["normal_before"],
+        "hot_first_opportunity": hx["first_opportunity"], "hot_below": below,
+        "hot_first_warning_window": hw["first_non_normal"], "hot_first_warning_static": ha["first_non_normal"],
     }
 
 

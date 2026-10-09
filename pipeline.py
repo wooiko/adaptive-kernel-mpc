@@ -17,19 +17,45 @@ BOOT_THR = 3.5       # first-pass cleaning only: threshold in in-sample robust s
 ALPHA = 0.005        # target share of normal samples rejected by the filter
 ALPHAS = (0.01, 0.005, 0.002)   # values compared in the report
 HORIZON = 20         # samples (2 min) along which the supervisor checks the planned trajectory
+LOO_TOL = 0.02       # settings within this share of the best leave-one-out RMSE are candidates
+HOLDOUT = 0.2        # last share of the start-up block kept out of the LOO search, for the free-run check
+FR_TOL = 0.50        # candidates within this share of the best held-out free-run RMSE are admissible
+MIN_CAL_ROWS = int(round(5 / ALPHA))   # calibration rows: at least 5 expected exceedances at ALPHA
 
 
-def tune(Z, tz, n_max=1000, seed=0, tol=0.02):
-    """Leave-one-out grid search on a random subset of the rows.
-    The LOO surface is flat near its minimum, so among all settings within `tol` of
-    the best one we take the strongest regularisation and then the narrowest kernel:
-    the smoothest model whose uncertainty still grows quickly away from the data."""
-    idx = np.random.default_rng(seed).choice(len(Z), size=min(n_max, len(Z)), replace=False)
+def tune(Z, tz, y, u, sc, n_max=1000, seed=0, tol=LOO_TOL, holdout=HOLDOUT, fr_tol=FR_TOL):
+    """Two-stage choice of (sigma, lam).
+    1. Leave-one-out grid search on a random subset of the first (1 - holdout) of the rows.
+       LOO measures the one-step error; its surface is flat near the minimum, and settings
+       within `tol` of the best may still differ many-fold in free-run (simulation) error,
+       which is what a controller relies on.
+    2. Every candidate of step 1 simulates the held-out last block of the start-up data
+       (free run from its first LAG values; y = cleaned measurements). Candidates within
+       `fr_tol` of the best held-out free-run RMSE are admissible.
+    Among the admissible settings the strongest regularisation and then the narrowest kernel
+    are taken: the smoothest model whose uncertainty still grows quickly away from the data.
+    Z row i holds the regressor for target i + LAG of y."""
+    n_fit = int((1.0 - holdout) * len(Z))
+    idx = np.random.default_rng(seed).choice(n_fit, size=min(n_max, n_fit), replace=False)
     _, _, table = loo_grid_search(Z[idx], tz[idx], SIGMAS, LAMS)
-    ok = table <= table.min() * (1.0 + tol)
+    band = table <= table.min() * (1.0 + tol)
+    b0 = n_fit + LAG                       # first target index not used by the LOO rows
+    y_ho, u_ho = y[b0 - LAG:], u[b0 - LAG:]
+    fr = np.full(table.shape, np.nan)
+    for i, j in zip(*np.where(band)):
+        m = Frozen(KRR(SIGMAS[i], LAMS[j]).fit(Z[idx], tz[idx]), sc)
+        fr[i, j] = rmse(free_run(m, y_ho, u_ho)[LAG:], y_ho[LAG:])
+    ok = band & (fr <= np.nanmin(fr) * (1.0 + fr_tol))
     j = max(np.where(ok.any(0))[0])
     i = min(np.where(ok[:, j])[0])
-    return float(SIGMAS[i]), float(LAMS[j]), table, idx
+    i0, j0 = np.unravel_index(np.argmin(table), table.shape)
+    info = {"n_candidates_loo": int(band.sum()), "n_admissible": int(ok.sum()),
+            "n_holdout": int(len(y_ho) - LAG),
+            "chosen": {"loo_over_min": float(table[i, j] / table.min()), "holdout_free_run_rmse": float(fr[i, j])},
+            "loo_minimum": {"sigma": float(SIGMAS[i0]), "lam": float(LAMS[j0]),
+                            "holdout_free_run_rmse": float(fr[i0, j0])},
+            "holdout_free_run_rmse_range": [float(np.nanmin(fr)), float(np.nanmax(fr))]}
+    return float(SIGMAS[i]), float(LAMS[j]), table, idx, info
 
 
 def calibrate_threshold(y, u, Zc, tzc, sc, sigma, noise, alphas=ALPHAS, window=WINDOW, step=REFIT_EVERY):
@@ -55,6 +81,10 @@ def calibrate_threshold(y, u, Zc, tzc, sc, sigma, noise, alphas=ALPHAS, window=W
         m = clean_row & (ks >= s0 + LAG) & (ks < min(s0 + step, len(Zc)) + LAG)   # row i <-> target i + LAG
         if m.any():
             ratios.append(np.abs(sc.t(t[m]) - svr.predict(sc.x(X[m]))) / s_in)
+    n_rows = int(sum(len(r) for r in ratios))
+    if n_rows < MIN_CAL_ROWS:
+        raise ValueError(f"start-up block too short: {n_rows} clean calibration rows, at least {MIN_CAL_ROWS} "
+                         f"are needed (5 expected exceedances at the default share {ALPHA})")
     ratios = np.concatenate(ratios)
     med = {}
     for name, causal in (("causal", True), ("centred", False)):
@@ -68,7 +98,8 @@ def commission(y, u, seed=0):
     1. Bootstrap: scaler, SVR filter and a first KRR from a random subset of raw rows
        (default kernel settings; the SVR loss is robust to the spikes still in there).
     2. Pass the block through the filter once to clean it.
-    3. Refit the scaler on the cleaned data; tune (sigma, lam) by leave-one-out.
+    3. Refit the scaler on the cleaned data; tune (sigma, lam): leave-one-out, then free
+       run on a held-out block (`tune`).
     4. Calibrate the anomaly thresholds on out-of-sample residuals.
     Returns everything needed to continue online."""
     noise = data.noise_std_estimate(y)
@@ -82,11 +113,11 @@ def commission(y, u, seed=0):
     Xc, tc, _ = regression_set(first["y_clean"], u)
     sc = Scaler().fit(Xc, tc)
     Zc, tzc = sc.x(Xc), sc.t(tc)
-    sigma, lam, table, idx = tune(Zc, tzc, seed=seed)
+    sigma, lam, table, idx, info = tune(Zc, tzc, first["y_clean"], u, sc, seed=seed)
     thr, thr_median, n_cal = calibrate_threshold(y, u, Zc, tzc, sc, sigma, noise)
-    return {"scaler": sc, "noise": noise, "sigma": sigma, "lam": lam, "loo_table": table,
+    return {"scaler": sc, "noise": noise, "sigma": sigma, "lam": lam, "loo_table": table, "tuning": info,
             "Z": Zc, "tz": tzc, "tune_idx": idx, "y_clean": first["y_clean"], "u": u,
-            "flagged": first["flagged"], "Xc": Xc, "tc": tc,
+            "flagged": first["flagged"], "flagged_rt": first["flagged_rt"], "Xc": Xc, "tc": tc,
             "thr": thr, "thr_median": thr_median, "n_calibration": n_cal}
 
 

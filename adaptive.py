@@ -19,6 +19,8 @@ from kernel import KRR
 
 NA, NB = 2, 2            # past outputs / past inputs in the regressor
 LAG = max(NA, NB)
+N_JUMP = 4               # consecutive rejections taken as a process change
+REFIT_EVERY_JUMP = 5     # accepted samples between refits while in jump mode
 
 
 def regressor(y_hist, u_hist, k):
@@ -98,7 +100,8 @@ class AdaptiveIdentifier:
         puts the measurements back into the history and the window (method `learn`);
       * while in jump mode the SVR test is not trusted, and single spikes are caught by a
         model-free test: distance from the least-squares line through the last `n_trend`
-        accepted measurements, extrapolated to the current sample, above thr_jump times
+        accepted measurements since the change (the restored run included), extrapolated
+        to the current sample, above thr_jump times
         its standard deviation for white sensor noise, noise_std * sqrt(1 + 1/m +
         (t - t_mean)^2 / Stt). A run of n_jump such rejections is again restored as a change;
       * the models are refitted every `refit_every_jump` accepted samples;
@@ -107,12 +110,14 @@ class AdaptiveIdentifier:
         to where the frozen filter agrees with it; the model-free test guards it meanwhile.
 
     horizon > 0: the supervisor also receives the largest GP variance along a free-run
-    of the model over the next `horizon` samples under the planned input (method `step`,
-    argument u_plan). This is the uncertainty of the trajectory a predictive controller
-    would rely on, not only of the current point."""
+    of the model under the planned input (method `step`, argument u_plan): `horizon`
+    regressors, from the current one (data up to k) on, with inputs up to u[k+H-1].
+    This is the uncertainty of the trajectory a predictive controller would rely on, not
+    only of the current point. The result is recorded at sample k+1, so an input change
+    at sample j can first be seen at sample j - H + 2, H - 2 samples before it."""
 
     def __init__(self, sigma, lam, scaler, Z0, tz0, noise_std, window=500, thr=3.5,
-                 n_jump=4, use_filter=True, adapt=True, refit_every=10, refit_every_jump=5,
+                 n_jump=N_JUMP, use_filter=True, adapt=True, refit_every=10, refit_every_jump=REFIT_EVERY_JUMP,
                  thr_jump=4.0, n_trend=6, horizon=0):
         self.sigma, self.lam, self.sc = sigma, lam, scaler
         self.thr, self.n_jump, self.thr_jump = thr, n_jump, thr_jump
@@ -150,6 +155,10 @@ class AdaptiveIdentifier:
                 self._since += 1
         if self.adapt and self._since:
             self._refit()
+
+    def predict(self, x):
+        """One-step prediction of the current window model, physical units."""
+        return float(self.sc.t_inv(self.krr.predict(self.sc.x(np.asarray(x, float))[None, :])[0]))
 
     def horizon_variance(self, x, u_plan):
         """Largest GP variance along an H-step free-run from regressor x (data up to k)
@@ -197,6 +206,7 @@ class AdaptiveIdentifier:
                 if spike and len(self._mf_pending) + 1 >= self.n_jump:
                     restore = [self._t - t for t in self._mf_pending] + [0]
                     self._mf_pending = []
+                    self._acc.clear()        # the trend restarts from the restored samples (method learn)
                 elif spike:
                     flagged, y_keep = True, extrap
                     self._mf_pending.append(self._t)
@@ -211,6 +221,7 @@ class AdaptiveIdentifier:
                     self._jump, self._passed = True, 0
                     restore = [self._t - t for t in self._pending] + [0]
                     self._pending = []
+                    self._acc.clear()        # samples before the change do not belong to the new trend
                 else:
                     flagged = True
                     self._pending.append(self._t)
@@ -237,7 +248,11 @@ def run_online(ident, y_meas, u, y_init, snapshot_at=(), probe_u=()):
     history (rejected or missing samples are replaced by the model prediction; when a
     run of rejections turns out to be a process change, the measurements are restored).
     y_init: values for the first LAG samples of the history (normally the first LAG
-    measurements of this record). snapshot_at: sample indices at which a copy of the
+    measurements of this record).
+    Two sets of flags: `flagged_rt` is the decision taken at each sample, i.e. what a
+    controller receives; `flagged` is the final one, after runs of rejections recognised
+    as process changes were restored (`y_rt` / `y_clean` likewise).
+    snapshot_at: sample indices at which a copy of the
     window model is stored, for frozen-model tests. probe_u: input values at which the GP
     variance is also evaluated at every sample (current outputs, both input lags = probe)."""
     n = len(u)
@@ -246,6 +261,9 @@ def run_online(ident, y_meas, u, y_init, snapshot_at=(), probe_u=()):
     y_hist[:LAG] = y_init[:LAG]
     out = {k: np.full(n, np.nan) for k in ("pred", "var", "var_h", "mult")}
     out["flagged"], out["regime"], out["jump"] = np.zeros(n, bool), np.zeros(n, int), np.zeros(n, bool)
+    out["flagged_rt"] = np.zeros(n, bool)     # decision at the moment of the sample (never undone)
+    out["y_rt"] = np.full(n, np.nan)          # value put into the history at that moment
+    out["y_rt"][:LAG] = y_hist[:LAG]
     out["snapshots"] = {}
     out["probe_var"] = np.full((n, len(probe_u)), np.nan)
     for k in range(LAG - 1, n - 1):
@@ -260,13 +278,17 @@ def run_online(ident, y_meas, u, y_init, snapshot_at=(), probe_u=()):
             P[:, NA:] = np.asarray(probe_u)[:, None]
             out["probe_var"][k + 1] = ident.krr.variance(ident.sc.x(P))
         r = ident.step(x, y_meas[k + 1], u_plan)
-        y_hist[k + 1] = r["y_keep"]
+        y_hist[k + 1] = out["y_rt"][k + 1] = r["y_keep"]
+        out["flagged_rt"][k + 1] = r["flagged"]
         for key in ("pred", "var", "var_h", "mult", "flagged", "regime", "jump"):
             out[key][k + 1] = r[key]
         if r["restore"]:
             idx = k + 1 - np.array(r["restore"])
             y_hist[idx] = y_meas[idx]
             out["flagged"][idx] = False
+            for j in range(idx.min() + 1, k + 1):     # a missing sample inside the run was predicted from the
+                if np.isnan(y_meas[j]):               # history before the restore: predict it again
+                    y_hist[j] = ident.predict(regressor(y_hist, u, j - 1))
             ident.learn(np.array([regressor(y_hist, u, j - 1) for j in idx]), y_meas[idx], r["restore"])
     out["y_clean"] = y_hist
     return out

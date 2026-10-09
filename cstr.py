@@ -84,12 +84,37 @@ def jacobian_eigenvalues(x, Tc, p: CSTRParams = CSTRParams(), h=1e-6):
     return np.linalg.eigvals(J)
 
 
-def cold_branch_limit(p: CSTRParams = CSTRParams(), lo=300.0, hi=310.0, tol=1e-4):
-    """Coolant temperature above which the low-temperature (cold) steady state no longer
-    exists (saddle-node point): above it the reactor ignites. Bisection on the number of
-    steady states in the cold part of the temperature axis."""
-    has_cold = lambda Tc: len(steady_states(Tc, p, 300.0, 360.0, 60001)) >= 2
-    while hi - lo > tol:
-        m = 0.5 * (lo + hi)
-        lo, hi = (m, hi) if has_cold(m) else (lo, m)
-    return lo
+def tc_of_T(T, p: CSTRParams = CSTRParams()):
+    """Steady states, read the other way round. The energy balance is linear in Tc, so
+    every steady state lies on the curve
+        Tc = T - [q/V (Tf - T) + J r(T)] / b,   J = -dH/(rho Cp),  b = UA/(V rho Cp),
+    with r(T) = k(T) Ca(T) and Ca(T) = (q/V) Caf / (q/V + k(T)) from the mass balance.
+    Returns (Tc, Ca, dTc/dT); dr/dT = (q/V)^2 Caf k E/R / (T^2 (q/V + k)^2)."""
+    a, J, b = p.q / p.V, p.mdelH / (p.rho * p.Cp), p.UA / (p.V * p.rho * p.Cp)
+    k = p.k0 * np.exp(-p.EoverR / T)
+    Ca = a * p.Caf / (a + k)
+    Tc = T - (a * (p.Tf - T) + J * k * Ca) / b
+    dr = a ** 2 * p.Caf * k * p.EoverR / (T ** 2 * (a + k) ** 2)
+    return Tc, Ca, 1.0 + (a - J * dr) / b
+
+
+def saddle_node(p: CSTRParams = CSTRParams(), T_lo=250.0, T_hi=600.0, n=35001):
+    """Point where the low-temperature (cold) steady state disappears: the first local
+    maximum of Tc(T) along T, i.e. the root of dTc/dT where it changes sign from + to -.
+    Equivalent to f(T, Tc) = 0 and df/dT = 0 for the energy balance f with Ca eliminated.
+    Returns (Tc, Ca, T); (nan, nan, nan) if the curve has no maximum (no multiplicity)."""
+    from scipy.optimize import brentq
+    T = np.linspace(T_lo, T_hi, n)
+    d = tc_of_T(T, p)[2]
+    i = np.where((d[:-1] > 0) & (d[1:] <= 0))[0]
+    if len(i) == 0:
+        return np.nan, np.nan, np.nan
+    Ts = brentq(lambda t: tc_of_T(t, p)[2], T[i[0]], T[i[0] + 1], xtol=1e-12)
+    Tc, Ca, _ = tc_of_T(Ts, p)
+    return float(Tc), float(Ca), float(Ts)
+
+
+def cold_branch_limit(p: CSTRParams = CSTRParams()):
+    """Coolant temperature above which the cold steady state no longer exists: above it
+    the reactor ignites."""
+    return saddle_node(p)[0]
