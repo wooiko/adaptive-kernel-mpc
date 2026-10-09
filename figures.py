@@ -24,15 +24,18 @@ def _save(fig, path, handles_from, ncol, bottom=0.07):
 
 
 def filter_fig(t, y_raw, run, path, n=1200):
+    """What the model received at each moment (real time), not the history after restores."""
     fig, ax = plt.subplots(figsize=(9, 3.8))
     s = slice(0, n)
-    fl = run["flagged"][s]
+    rt, fin = run["flagged_rt"][s], run["flagged"][s]
     ax.plot(t[s], y_raw[s], ".", ms=3, color=MUTED, label="raw measurement")
-    ax.plot(t[s], run["y_clean"][s], color=BLUE, lw=1.2, label="after the SVR filter")
-    ax.plot(t[s][fl], y_raw[s][fl], "o", ms=7, mfc="none", mec=ORANGE, mew=1.6,
+    ax.plot(t[s], run["y_rt"][s], color=BLUE, lw=1.2, label="passed to the model (real time)")
+    ax.plot(t[s][fin], y_raw[s][fin], "o", ms=7, mfc="none", mec=ORANGE, mew=1.6,
             label="rejected as anomalous")
+    ax.plot(t[s][rt & ~fin], y_raw[s][rt & ~fin], "s", ms=7, mfc="none", mec=VIOLET, mew=1.4,
+            label="rejected, restored later as a process change")
     ax.set(title="Level 1: SVR filter on unseen data", xlabel="time, min", ylabel="Ca, mol/L")
-    _save(fig, path, ax, 3, 0.09)
+    _save(fig, path, ax, 2, 0.13)
 
 
 def free_run_fig(t, ref, sims, ref_name, path, n=900):
@@ -50,8 +53,12 @@ def free_run_fig(t, ref, sims, ref_name, path, n=900):
 
 
 def _rolling_rmse(e, w=300):
-    e2 = np.where(np.isnan(e), 0.0, e ** 2)
-    return np.sqrt(np.convolve(e2, np.ones(w) / w, mode="same"))
+    """Centred rolling RMSE over the samples actually available: missing values and the
+    ends of the record shorten the window instead of counting as zero error."""
+    ok = ~np.isnan(e)
+    num = np.convolve(np.where(ok, e ** 2, 0.0), np.ones(w), mode="same")
+    cnt = np.convolve(ok.astype(float), np.ones(w), mode="same")
+    return np.sqrt(np.divide(num, cnt, out=np.full(len(e), np.nan), where=cnt > 0))
 
 
 def drift_fig(t, true, runs, k0_scale, path):
