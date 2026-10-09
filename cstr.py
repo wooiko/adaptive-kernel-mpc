@@ -56,3 +56,40 @@ def simulate(Tc_seq, Ts, x0, p: CSTRParams = CSTRParams(), k0_scale=None):
         sol = solve_ivp(rhs, (0.0, Ts), xk, args=(Tc, pk), rtol=1e-8, atol=1e-10)
         xk = sol.y[:, -1]
     return x
+
+
+def _T_balance(T, Tc, p):
+    """Energy balance at a steady state, with Ca eliminated through the mass balance."""
+    k = p.k0 * np.exp(-p.EoverR / T)
+    Ca = p.q / p.V * p.Caf / (p.q / p.V + k)
+    return rhs(0.0, [Ca, T], Tc, p)[1], Ca
+
+
+def steady_states(Tc, p: CSTRParams = CSTRParams(), lo=300.0, hi=500.0, n=20001):
+    """All steady states (Ca, T) at a given coolant temperature, ordered by T."""
+    from scipy.optimize import brentq
+    T = np.linspace(lo, hi, n)
+    f = np.array([_T_balance(t, Tc, p)[0] for t in T])
+    roots = [brentq(lambda t: _T_balance(t, Tc, p)[0], T[i], T[i + 1])
+             for i in np.where(np.sign(f[:-1]) != np.sign(f[1:]))[0]]
+    return [(_T_balance(t, Tc, p)[1], t) for t in roots]
+
+
+def jacobian_eigenvalues(x, Tc, p: CSTRParams = CSTRParams(), h=1e-6):
+    x = np.asarray(x, float)
+    J = np.zeros((2, 2))
+    for j in range(2):
+        e = np.zeros(2); e[j] = h * max(1.0, abs(x[j]))
+        J[:, j] = (np.array(rhs(0, x + e, Tc, p)) - np.array(rhs(0, x - e, Tc, p))) / (2 * e[j])
+    return np.linalg.eigvals(J)
+
+
+def cold_branch_limit(p: CSTRParams = CSTRParams(), lo=300.0, hi=310.0, tol=1e-4):
+    """Coolant temperature above which the low-temperature (cold) steady state no longer
+    exists (saddle-node point): above it the reactor ignites. Bisection on the number of
+    steady states in the cold part of the temperature axis."""
+    has_cold = lambda Tc: len(steady_states(Tc, p, 300.0, 360.0, 60001)) >= 2
+    while hi - lo > tol:
+        m = 0.5 * (lo + hi)
+        lo, hi = (m, hi) if has_cold(m) else (lo, m)
+    return lo
