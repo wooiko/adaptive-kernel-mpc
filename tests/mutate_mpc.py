@@ -69,6 +69,17 @@ MUTATIONS = [
      "K-MPC: d_k recomputed on a missing sample"),
     ("settle_window_early", "closed_loop.py", "out = np.abs(ca[s:e] - r[s:e]) > band",
      "out = np.abs(ca[s - 5:e] - r[s - 5:e]) > band", "metrics: settling search starts before the event"),
+    ("d_filter_bypass", "mpc.py", "self.d = self.d + self.beta * (e - self.d)", "self.d = e",
+     "K-MPC: filter of the disturbance estimate bypassed"),
+    ("hold_on_reject_off", "mpc.py", "hold_d_on_reject=True, solver_settings=None",
+     "hold_d_on_reject=False, solver_settings=None", "K-MPC: d_k recomputed on a rejected sample by default"),
+    ("supervisor_ignored", "closed_loop.py", '"mult": res["mult"] if supervisor else 1.0', '"mult": res["mult"]',
+     "closed loop: supervisor switch ignored"),
+    ("pid_no_backcalc", "controllers.py",
+     "self.I += self.Kc * self.ts / self.tau_i * e + self.ts / self.tau_i * (uk - v)",
+     "self.I += self.Kc * self.ts / self.tau_i * e", "PID: anti-windup back-calculation removed"),
+    ("nmpc_grad_sign", "controllers.py", "+ mpc.difference_matrix(Nc).T @ (2.0 * w * dU)",
+     "- mpc.difference_matrix(Nc).T @ (2.0 * w * dU)", "NMPC: sign of the move term in the gradient"),
 ]
 
 

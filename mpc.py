@@ -13,7 +13,8 @@ Model, physical units:  y_{j+1} = f(x_j),   g(x) = df/dx = [a1, a2, b1, b2]  (ad
    the last real-time measurements (the filter's y_rt, never the history restored later):
        ybar_{k+i+1} = f(xbar_{k+i}) + d_k,   xbar_{k+i} = [ybar_{k+i}, ybar_{k+i-1}, ubar_{k+i}, ubar_{k+i-1}],
        ybar_k = y_k,  ybar_{k-1} = y_{k-1},  ubar_{k-1} = u_{k-1},  i = 0 .. Np-1,
-   with the disturbance estimate d_k = y_k - f(x_{k-1}) (one-step prediction error; `disturbance`).
+   with the disturbance estimate d_k: the one-step prediction error y_k - f(x_{k-1}) (`disturbance`),
+   passed through a first-order filter with gain beta in KMPC (accepted 10.10.2026, see KMPC).
    d_k enters every step of the recursion (variant A, accepted 10.10.2026), not added after it
    as written in TZ 5.4: the free run starts from y_k, which already contains the disturbance,
    and for an autoregressive model a constant added after the recursion leaves a steady-state
@@ -290,21 +291,28 @@ def plan(model, y_k, y_km1, u_km1, d, Vbar, r, q0, r0, mult=1.0, asymmetric=True
 
 class KMPC:
     """K-MPC with its state between steps: the last plan V (nominal for the next step and u_plan for the
-    supervisor) and the disturbance estimate d.
+    supervisor) and the filtered disturbance estimate d.
 
     step(k, y, u, r, info) -> (u_k, details), where y holds the real-time history up to k (what the
     filter has passed by sample k; y[k] is the filter's y_rt), u the applied inputs up to k-1, r the
     set-point (scalar, or one value per horizon step), info = {"mult": supervisor multiplier m_k,
     "missing": y_k not measured, "rejected": y_k rejected by the filter}.
-    d_k = y_k - f(x_k-1) is recomputed only when y_k was measured: a missing sample keeps d_k-1
-    (TZ 6.3). hold_d_on_reject=True keeps it also when the filter replaced y_k by the model's own
-    prediction (then y_k - f(x_k-1) is zero by construction)."""
 
-    def __init__(self, model, u_max, rho, q0=None, Np=NP, Nc=NC, asymmetric=True, n_iter=1,
-                 u_min=TC_MIN, du_max=DU_MAX, hold_d_on_reject=False, solver_settings=None):
+    Disturbance estimate (TZ 5.4 with the changes accepted 10.10.2026): the one-step error
+    e_k = y_k - f(x_k-1) is passed through a first-order filter,
+        d_k = d_k-1 + beta (e_k - d_k-1),   0 < beta <= 1   (beta = 1: no filter),
+    because d_k enters every step of the free run and its noise is amplified along the horizon. A
+    constant disturbance is still estimated without bias (the filter's fixed point is d = e). On a
+    missing sample, and on a sample the filter rejected (then y_k is the model's own prediction and
+    e_k is zero by construction), d_k = d_k-1. beta is tuned on S0 together with rho."""
+
+    def __init__(self, model, u_max, rho, beta=1.0, q0=None, Np=NP, Nc=NC, asymmetric=True, n_iter=1,
+                 u_min=TC_MIN, du_max=DU_MAX, hold_d_on_reject=True, solver_settings=None):
+        if not 0.0 < beta <= 1.0:
+            raise ValueError(f"beta must lie in (0, 1], got {beta}")
         self.model, self.u_max, self.u_min, self.du_max = model, float(u_max), float(u_min), float(du_max)
         self.q0 = q0_default() if q0 is None else float(q0)
-        self.rho, self.r0 = float(rho), r0_of(rho)
+        self.rho, self.r0, self.beta = float(rho), r0_of(rho), float(beta)
         self.Np, self.Nc, self.asymmetric, self.n_iter = Np, Nc, asymmetric, n_iter
         self.hold_d_on_reject = hold_d_on_reject
         self.solver = Solver(solver_settings)
@@ -319,16 +327,23 @@ class KMPC:
             return np.full(n, float(u_prev))
         return (blocking_matrix(n + 1, self.Nc) @ self.V)[1:]
 
-    def step(self, k, y, u, r, info=None):
-        info = info or {}
+    def update_disturbance(self, k, y, u, info):
         x_km1 = np.array([y[k - 1], y[k - 2], u[k - 1], u[k - 2]], float)
         hold = info.get("missing", False) or (self.hold_d_on_reject and info.get("rejected", False))
         if not hold:
-            self.d = disturbance(self.model, y[k], x_km1)
+            e = disturbance(self.model, y[k], x_km1)
+            self.d = self.d + self.beta * (e - self.d)
+
+    def optimise(self, k, y, u, r, mult, Vbar):
+        """The plan for this step: the K-MPC QP (subclasses replace it)."""
+        return plan(self.model, y[k], y[k - 1], u[k - 1], self.d, Vbar, r, self.q0, self.r0, mult,
+                    self.asymmetric, self.u_max, self.u_min, self.du_max, self.Np, self.n_iter, self.solver)
+
+    def step(self, k, y, u, r, info=None):
+        info = info or {}
+        self.update_disturbance(k, y, u, info)
         Vbar = shift_plan(self.V, u[k - 1], self.Nc)
-        out = plan(self.model, y[k], y[k - 1], u[k - 1], self.d, Vbar, r, self.q0, self.r0,
-                   info.get("mult", 1.0), self.asymmetric, self.u_max, self.u_min, self.du_max, self.Np,
-                   self.n_iter, self.solver)
+        out = self.optimise(k, y, u, r, info.get("mult", 1.0), Vbar)
         self.V = out["V"]
         self.n_steps += 1
         self.n_fallback += int(out["fallback"])

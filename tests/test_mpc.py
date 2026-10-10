@@ -12,6 +12,7 @@ from scipy.optimize import fsolve, minimize
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import closed_loop as cl  # noqa: E402
+import controllers as ctl  # noqa: E402
 import cstr  # noqa: E402
 import data  # noqa: E402
 import mpc  # noqa: E402
@@ -567,6 +568,183 @@ class IgnitionThreshold(unittest.TestCase):
         hot = cstr.steady_states(cstr.saddle_node()[0] + 0.1)
         self.assertEqual(len(hot), 1)
         self.assertGreater(hot[0][1], cl.IGNITION_T + 10.0)
+
+
+class DisturbanceFilter(unittest.TestCase):
+    """Mutation: filter of d_k bypassed (d_k = e_k)."""
+    def test_first_order_recursion(self):
+        m = mpc.linear_model(TH)
+        c = mpc.KMPC(m, 1e3, 0.1, beta=0.25, u_min=-1e3, du_max=1e3)
+        y, u = np.array([0.1, 0.2, 0.0]), np.array([1.0, 1.0, np.nan])
+        y[2] = TH @ [y[1], y[0], u[1], u[0]] + 0.04          # one-step error e = 0.04
+        expected = 0.0
+        for _ in range(5):
+            c.update_disturbance(2, y, u, {})
+            expected += 0.25 * (0.04 - expected)
+            self.assertAlmostEqual(c.d, expected, places=14)
+
+    def test_beta_out_of_range(self):
+        for b in (0.0, 1.5):
+            with self.assertRaises(ValueError):
+                mpc.KMPC(mpc.linear_model(TH), 1e3, 0.1, beta=b)
+
+    def test_rejected_sample_keeps_d_by_default(self):
+        c = mpc.KMPC(mpc.linear_model(TH), 1e3, 0.1, u_min=-1e3, du_max=1e3)
+        c.d = 0.05
+        c.update_disturbance(2, np.array([0.1, 0.2, 0.3]), np.array([1.0, 1.0, np.nan]), {"rejected": True})
+        self.assertEqual(c.d, 0.05)
+
+    def test_offset_free_with_filter(self):
+        """Constant output offset on the measurement of an exactly known linear plant, beta < 1: the
+        measured output settles on the set-point."""
+        n, d0 = 300, 0.05
+        add = np.r_[np.zeros(100), np.full(n - 100, d0)]
+        ctrl = mpc.KMPC(mpc.linear_model(TH), 1e3, 0.1, beta=0.2, u_min=-1e3, du_max=1e3)
+        log = cl.run_loop(cl.LinearPlant(TH), np.zeros(3), PassThrough(), ctrl, np.full(n, 0.5), add,
+                          np.zeros(n, bool), 0.0)
+        self.assertLess(np.max(np.abs(log["y_meas"][n - 50:] - 0.5)), 1e-6)
+
+
+class _Recorder:
+    """Controller that holds the input and records the multiplier it receives."""
+    def __init__(self): self.mults = []
+    def planned_inputs(self, u_prev, n): return np.full(n, u_prev)
+
+    def step(self, k, y, u, r, info):
+        self.mults.append(info["mult"])
+        return float(u[k - 1]), {}
+
+
+class _Mult2(PassThrough):
+    def step(self, x, y, u_plan=None):
+        return {**super().step(x, y, u_plan), "mult": 2.0, "regime": 2}
+
+
+class SupervisorSwitch(unittest.TestCase):
+    """Mutation: supervisor=False ignored."""
+    def test_multiplier_passed_or_not(self):
+        for sup, want in ((True, 2.0), (False, 1.0)):
+            rec = _Recorder()
+            cl.run_loop(cl.LinearPlant(TH), np.zeros(3), _Mult2(), rec, np.zeros(10), np.zeros(10),
+                        np.zeros(10, bool), 0.0, supervisor=sup)
+            self.assertEqual(set(rec.mults), {want})
+
+
+class PIDController(unittest.TestCase):
+    """Mutation: back-calculation term of the anti-windup removed."""
+    def test_fopdt_fit_recovers_known_process(self):
+        rng = np.random.default_rng(81)
+        u = data.aprbs(1500, 292.0, 303.0, 10, 60, rng)
+        K, tau, n = -0.02, 1.0, 3
+        a = np.exp(-data.TS / tau)
+        x = np.zeros(len(u))
+        for k in range(len(u) - 1):
+            x[k + 1] = a * x[k] + (1 - a) * K * (u[max(k - n, 0)] - u.mean())
+        f = ctl.fit_fopdt(x + 0.9, u)
+        self.assertEqual(f["delay_samples"], n)
+        self.assertAlmostEqual(f["K"], K, delta=1e-3 * abs(K))
+        self.assertAlmostEqual(f["tau"], tau, delta=1e-3)
+        self.assertAlmostEqual(f["theta"], n * data.TS + data.TS / 2, places=12)
+
+    def test_simc_rules(self):
+        Kc, ti = ctl.simc_pi(-0.01, 1.2, 0.45, 0.9)
+        self.assertAlmostEqual(Kc, 1.2 / (-0.01 * 1.35), places=12)
+        self.assertAlmostEqual(ti, 1.2, places=12)
+        self.assertAlmostEqual(ctl.simc_pi(-0.01, 9.0, 0.45, 0.9)[1], 4 * 1.35, places=12)
+
+    def test_anti_windup(self):
+        """Linear plant (gain 0.5), set-point out of reach for 30 min, then back: with back-calculation the
+        input leaves the limit within a few samples."""
+        n, u_max = 400, 0.5
+        r = np.r_[np.full(50, 0.1), np.full(300, 1.0), np.full(n - 350, 0.1)]   # 1.0 needs u = 2 > u_max
+        Kc, ti = ctl.simc_pi(0.5, 1.0, 0.15, 0.3)
+        pid = ctl.PID(Kc, ti, u_max, u_min=-u_max, du_max=1e3)
+        log = cl.run_loop(cl.LinearPlant(TH), np.zeros(3), PassThrough(), pid, r, np.zeros(n), np.zeros(n, bool), 0.0)
+        u = log["u"]
+        self.assertTrue(np.all(np.abs(u[300:350] - u_max) < 1e-12))           # saturated while out of reach
+        leave = np.where(u[350:] < u_max - 1e-9)[0][0]
+        self.assertLessEqual(leave, 3)
+
+
+class NMPCOnKRR(unittest.TestCase):
+    """Mutation: sign of the move term in the NMPC gradient."""
+    def test_gradient_against_central_differences(self):
+        Phi, Ybar, Vbar, r, u = _qp_case(91)
+        y_k, y_km1, _, _ = _start(np.random.default_rng(91))
+        model = mpc.window_model(IDENT)
+        V = Vbar + np.random.default_rng(92).normal(0, 0.5, mpc.NC)
+        J, g = ctl.nonlinear_cost(model, y_k, y_km1, u, 0.003, V, r, Q0, R0, MULT, True)
+        h = 1e-4
+        fd = np.array([(ctl.nonlinear_cost(model, y_k, y_km1, u, 0.003, V + h * e, r, Q0, R0, MULT, True)[0]
+                        - ctl.nonlinear_cost(model, y_k, y_km1, u, 0.003, V - h * e, r, Q0, R0, MULT, True)[0])
+                       / (2 * h) for e in np.eye(mpc.NC)])
+        self.assertLess(np.max(np.abs(g - fd)) / np.max(np.abs(g)), 1e-5)
+
+    def test_not_worse_than_kmpc_on_the_true_cost(self):
+        model = mpc.window_model(IDENT)
+        rng = np.random.default_rng(93)
+        for _ in range(3):
+            y_k, y_km1, u_km1, _ = _start(rng)
+            r = y_k + rng.uniform(-0.03, 0.03)
+            k_c = mpc.KMPC(model, 300.5, 1.0); n_c = ctl.NMPC(model, 300.5, 1.0)
+            y, u = np.array([y_km1, y_km1, y_k]), np.array([u_km1, u_km1, np.nan])
+            vk = k_c.optimise(2, y, u, r, 1.0, mpc.shift_plan(None, u_km1))["V"]
+            vn = n_c.optimise(2, y, u, r, 1.0, mpc.shift_plan(None, u_km1))["V"]
+            jk = ctl.nonlinear_cost(model, y_k, y_km1, u_km1, 0.0, vk, r, mpc.q0_default(), 1.0, 1.0, True)[0]
+            jn = ctl.nonlinear_cost(model, y_k, y_km1, u_km1, 0.0, vn, r, mpc.q0_default(), 1.0, 1.0, True)[0]
+            self.assertLessEqual(jn, jk * (1 + 1e-9))
+
+
+class OracleModel(unittest.TestCase):
+    def test_rk4_against_plant_integrator(self):
+        x0 = np.array(safety.cold_steady_state(296.0))
+        U = np.array([[296.0, 298.0, 299.0, 297.0, 300.0] + [300.0] * 15])
+        ca = ctl.rk4_ca(x0, U, cstr.CSTRParams())[0]
+        ref = cstr.simulate(np.r_[U[0], U[0, -1]], data.TS, x0)[1:, 0]
+        self.assertLess(np.max(np.abs(ca - ref)), 1e-7)
+
+
+class Scenarios(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.lim = safety.tc_max()["tc_max"]
+
+    def test_streams_distinct_and_new(self):
+        ids = list(cl.SCENARIO_IDS.values())
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertGreaterEqual(min(ids), 10)
+
+    def test_s2_setpoint_reachable_under_every_disturbance(self):
+        sc = cl.scenario_s2(0, self.lim)
+        for k in (0, 150, 300, 500, 999):
+            p = sc["plant"].params(k)
+            lo, hi = safety.reachable_setpoints(u_max=self.lim, p=p)
+            self.assertTrue(lo < sc["r"][k] < hi, k)
+
+    def test_s3_levels_reachable_throughout(self):
+        sc = cl.scenario_s3(0, self.lim)
+        for k in (sc["starts"][0], sc["starts"][-1], len(sc["r"]) - 1):
+            lo, hi = safety.reachable_setpoints(u_max=self.lim, p=sc["plant"].params(k))
+            self.assertTrue(np.all((sc["r"][sc["starts"][0]:] > lo) & (sc["r"][sc["starts"][0]:] < hi)))
+
+    def test_s4_reference_differs_only_by_spikes(self):
+        a, b = cl.scenario_s4(0, self.lim), cl.scenario_s4(0, self.lim, spikes=False)
+        np.testing.assert_allclose(a["add"][~a["spike"]], b["add"][~a["spike"]], atol=1e-15)
+        self.assertFalse(b["spike"].any())
+        self.assertTrue(np.all(np.abs(a["add"][a["spike"]] - b["add"][a["spike"]]) >= 5 * data.NOISE_STD - 1e-12))
+
+    def test_s5_edge_and_s6_outside(self):
+        res = safety.tc_max()
+        sc = cl.scenario_s5(0, self.lim)
+        edge = safety.cold_steady_state(self.lim, safety.params_at(res["worst_vertex"]))[0]
+        self.assertAlmostEqual(sc["r"][-1], edge, places=12)
+        p_end = sc["plant"].params(len(sc["r"]) - 1)
+        self.assertAlmostEqual(p_end.UA, res["worst_vertex"]["UA"], places=9)
+        self.assertAlmostEqual(p_end.Tf, res["worst_vertex"]["Tf"], places=9)
+        s6 = cl.scenario_s6(0, self.lim)
+        lo, hi = safety.reachable_setpoints(u_max=self.lim)
+        self.assertGreater(s6["r"][s6["starts"][0]], hi)
+        self.assertLess(s6["r"][s6["starts"][2]], lo)
 
 
 if __name__ == "__main__":
