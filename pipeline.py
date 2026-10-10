@@ -49,13 +49,45 @@ def tune(Z, tz, y, u, sc, n_max=1000, seed=0, tol=LOO_TOL, holdout=HOLDOUT, fr_t
     j = max(np.where(ok.any(0))[0])
     i = min(np.where(ok[:, j])[0])
     i0, j0 = np.unravel_index(np.argmin(table), table.shape)
-    info = {"n_candidates_loo": int(band.sum()), "n_admissible": int(ok.sum()),
+    jl = max(np.where(band.any(0))[0])
+    il = min(np.where(band[:, jl])[0])           # what the same rule picks from the LOO band alone
+    info = {"n_candidates_loo": int(band.sum()), "n_admissible": int(ok.sum()), "n_rows": int(len(Z)),
+            "changed_by_free_run": bool((il, jl) != (i, j)),
+            "admissible": [[float(SIGMAS[a]), float(LAMS[b])] for a, b in zip(*np.where(ok))],
+            "loo_min_on_grid_edge": bool(j0 == 0 or j0 == len(LAMS) - 1 or i0 == 0 or i0 == len(SIGMAS) - 1),
             "n_holdout": int(len(y_ho) - LAG),
             "chosen": {"loo_over_min": float(table[i, j] / table.min()), "holdout_free_run_rmse": float(fr[i, j])},
             "loo_minimum": {"sigma": float(SIGMAS[i0]), "lam": float(LAMS[j0]),
                             "holdout_free_run_rmse": float(fr[i0, j0])},
             "holdout_free_run_rmse_range": [float(np.nanmin(fr)), float(np.nanmax(fr))]}
     return float(SIGMAS[i]), float(LAMS[j]), table, idx, info
+
+
+def calibration_rows(y, u, noise):
+    """Regression rows of a raw record whose target and lagged outputs are neither spikes
+    (offline centred-median mask) nor missing; returns (X, t, target index, clean flag)."""
+    spike = data.spike_mask_offline(y, noise) | np.isnan(y)
+    X, t, ks = regression_set(y, u)
+    return X, t, ks, ~spike[ks] & ~spike[ks - 1] & ~spike[ks - 2]
+
+
+def startup_check(y, u, startup_share=None):
+    """Before anything is fitted on a supplied start-up block: the recording resolution allows a
+    noise estimate, and there are enough clean rows after the first window to calibrate the
+    threshold (MIN_CAL_ROWS). Raises ValueError with the shortfall."""
+    noise = data.noise_std_estimate(y)
+    data.check_resolution(y, noise)
+    _, _, ks, clean = calibration_rows(y, u, noise)
+    usable = ks >= WINDOW + LAG
+    n_clean = int(np.sum(clean & usable))
+    if n_clean < MIN_CAL_ROWS:
+        share = n_clean / max(int(usable.sum()), 1)
+        need = int(np.ceil(WINDOW + LAG + MIN_CAL_ROWS / max(share, 1e-9)))
+        whole = f" (a log of about {int(np.ceil(need / startup_share))})" if startup_share else ""
+        raise ValueError(f"start-up block too short: {n_clean} clean calibration rows after the first {WINDOW}, "
+                         f"at least {MIN_CAL_ROWS} are needed; at this share of clean rows the start-up block "
+                         f"needs about {need} samples{whole}")
+    return noise
 
 
 def calibrate_threshold(y, u, Zc, tzc, sc, sigma, noise, alphas=ALPHAS, window=WINDOW, step=REFIT_EVERY):
@@ -70,9 +102,8 @@ def calibrate_threshold(y, u, Zc, tzc, sc, sigma, noise, alphas=ALPHAS, window=W
     the in-sample underestimate of the scatter and its heavy tails.
     Rolling median (reference), causal and centred: (1 - alpha) quantile of the distance
     from the median on the clean samples, in mol/L."""
+    X, t, ks, clean_row = calibration_rows(y, u, noise)
     spike = data.spike_mask_offline(y, noise) | np.isnan(y)
-    X, t, ks = regression_set(y, u)
-    clean_row = ~spike[ks] & ~spike[ks - 1] & ~spike[ks - 2]
     ratios = []
     for s0 in range(window, len(Zc), step):
         tr = slice(s0 - window, s0)
@@ -103,6 +134,7 @@ def commission(y, u, seed=0):
     4. Calibrate the anomaly thresholds on out-of-sample residuals.
     Returns everything needed to continue online."""
     noise = data.noise_std_estimate(y)
+    data.check_resolution(y, noise)
     X, t, _ = regression_set(y, u)
     sc0 = Scaler().fit(X, t)
     idx = np.sort(np.random.default_rng(seed).choice(len(X), size=min(WINDOW, len(X)), replace=False))
@@ -135,10 +167,11 @@ def first_values(y, fallback):
 
 
 class StaticKRR:
-    """KRR fitted once on the tuning subset, in physical units."""
-    def __init__(self, c):
+    """KRR fitted once on all start-up rows (the same rows as the linear references), in
+    physical units. Only the leave-one-out grid search runs on a subset, to keep it cheap."""
+    def __init__(self, c, sigma=None, lam=None):
         self.sc = c["scaler"]
-        self.m = KRR(c["sigma"], c["lam"]).fit(c["Z"][c["tune_idx"]], c["tz"][c["tune_idx"]])
+        self.m = KRR(c["sigma"] if sigma is None else sigma, c["lam"] if lam is None else lam).fit(c["Z"], c["tz"])
 
     def predict(self, X): return self.sc.t_inv(self.m.predict(self.sc.x(np.atleast_2d(X))))
     def variance(self, X): return self.m.variance(self.sc.x(np.atleast_2d(X)))

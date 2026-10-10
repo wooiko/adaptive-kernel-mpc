@@ -27,7 +27,10 @@ def aprbs(n, lo, hi, min_hold, max_hold, rng):
     return u
 
 
-def make_log(Tc, seed, anomaly_rate=0.02, k0_scale=None, gap_at=None):
+ANOMALY_RATE = 0.02  # share of samples with an injected spike in the simulated logs
+
+
+def make_log(Tc, seed, anomaly_rate=ANOMALY_RATE, k0_scale=None, gap_at=None):
     """Run the reactor on the input sequence Tc and return a 'raw plant log'.
 
     Added on purpose: Gaussian sensor noise, isolated spikes of 5-25 noise standard
@@ -67,18 +70,39 @@ def validate_log(df, min_samples):
     if df["t_min"].isna().any() or df["Tc_K"].isna().any():
         raise ValueError("log: missing values in t_min or Tc_K (only Ca_mol_L may have gaps; "
                          "a missing input cannot be replaced by a prediction)")
-    dt = np.diff(df["t_min"].to_numpy())
-    ts = float(np.median(dt))
-    if ts <= 0 or np.max(np.abs(dt - ts)) > 0.01 * ts:
-        raise ValueError(f"log: sampling is not uniform (median step {ts:g} min, steps from "
-                         f"{dt.min():g} to {dt.max():g} min); resample it or mark lost samples "
-                         "as empty Ca_mol_L on a uniform time grid")
+    t = df["t_min"].to_numpy()
+    ts = float((t[-1] - t[0]) / (len(t) - 1))
+    dev = np.abs(t - (t[0] + ts * np.arange(len(t))))
+    if ts <= 0 or np.any(np.diff(t) <= 0) or dev.max() > 0.1 * ts:
+        # a uniform grid within a tenth of a step: timestamps rounded on writing pass, a lost row does not
+        raise ValueError(f"log: sampling is not uniform (mean step {ts:g} min, largest deviation from the "
+                         f"uniform grid {dev.max():g} min); resample it or mark lost samples as empty "
+                         "Ca_mol_L on a uniform time grid")
     if np.ptp(df["Tc_K"].to_numpy()) == 0:
         raise ValueError("log: Tc_K is constant; the input must vary for identification")
-    if df["Ca_mol_L"].notna().sum() < min_samples:
-        raise ValueError(f"log: {int(df['Ca_mol_L'].notna().sum())} measured values of Ca_mol_L; "
-                         f"at least {min_samples} are needed")
     return ts
+
+
+def recording_step(y):
+    """Smallest non-zero change between consecutive measured values: the resolution at which
+    the signal was recorded (about machine precision for an unrounded simulated signal)."""
+    d = np.abs(np.diff(y[~np.isnan(y)]))
+    d = d[d > 0]
+    return float(d.min()) if len(d) else 0.0
+
+
+def check_resolution(y, noise):
+    """The noise estimate below works on second differences. If the signal is recorded with a
+    step q that is not finer than the noise, the second differences are multiples of q, their
+    median absolute deviation is quantised, and the estimate moves in steps of about
+    1.4826 q / sqrt(6) = 0.6 q (down to exactly zero for a coarse enough step). Raises
+    ValueError when q is not smaller than the estimated noise."""
+    q = recording_step(y)
+    if not np.isfinite(noise) or noise <= 0 or q >= noise:
+        raise ValueError(f"Ca is recorded with a step of {q:g} mol/L, not finer than the sensor noise "
+                         f"estimated from it ({noise:g} mol/L); the estimate is then quantised in steps of "
+                         f"about {0.605 * q:.2g} and cannot be trusted. Supply Ca at a finer resolution.")
+    return q
 
 
 def noise_std_estimate(y, k=4.0, iters=2):
@@ -124,6 +148,7 @@ def describe(df, y="Ca_mol_L", u="Tc_K"):
     hist, _ = np.histogram(uu, bins=10)
     return {"n_samples": int(len(df)), "n_missing": int(df[y].isna().sum()),
             "noise_std_est": noise_std_estimate(df[y].to_numpy()),
+            "ca_recording_step": recording_step(df[y].to_numpy()),
             "input_min": float(uu.min()), "input_max": float(uu.max()),
             "input_levels": int(np.sum(np.diff(uu) != 0) + 1),
             "input_emptiest_decile_share": float(hist.min() / len(uu))}

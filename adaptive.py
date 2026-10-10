@@ -23,6 +23,13 @@ N_JUMP = 4               # consecutive rejections taken as a process change
 REFIT_EVERY_JUMP = 5     # accepted samples between refits while in jump mode
 
 
+def first_opportunity(j, horizon):
+    """First sample at which the supervisor's planned trajectory contains the input applied
+    at sample j: the plan checked at step k holds inputs up to u[k + horizon - 1] and its
+    result is recorded at sample k + 1 (see AdaptiveIdentifier, horizon)."""
+    return j - horizon + 2
+
+
 def regressor(y_hist, u_hist, k):
     """Regressor for predicting y[k+1] from data up to time k."""
     return np.r_[y_hist[k - NA + 1:k + 1][::-1], u_hist[k - NB + 1:k + 1][::-1]]

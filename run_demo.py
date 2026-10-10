@@ -1,8 +1,8 @@
 """One command: data -> start-up -> models -> validation -> report.
 
-    python run_demo.py                  # simulated CSTR experiments, one seed (about 5 minutes on 2 cores)
+    python run_demo.py                  # simulated CSTR experiments, one seed (about 6 minutes)
     python run_demo.py --data log.csv   # your own log, columns: t_min, Tc_K, Ca_mol_L
-    python run_seeds.py                 # the same over 20 seeds (about 50 minutes on 2 cores)
+    python run_seeds.py                 # the same over 20 seeds (about 60 minutes on 2 cores)
 
 Everything is written to ./outputs (figures, metrics.json, report.md).
 """
@@ -19,13 +19,18 @@ import cstr
 import data
 import figures
 import pipeline as pl
-from adaptive import LAG, N_JUMP, REFIT_EVERY_JUMP, Supervisor, regressor, run_online
+from threadpoolctl import threadpool_limits
+
+from adaptive import LAG, N_JUMP, NA, NB, REFIT_EVERY_JUMP, Supervisor, first_opportunity, regressor, run_online
 from report import write_report
 
 OUT = Path(__file__).parent / "outputs"
 TC_RANGE = (292.0, 303.0)       # coolant temperature range of the identification experiment, K
 PROBE_TC = (292.0, 297.5, 303.0)  # inputs at which the GP variance is probed during the excursion
 HOT_TC, HOT_LEN = 304.0, 60     # hot-side excursion: coolant temperature, K, and duration, samples
+HOT_START, HOT_TOTAL = 300, 800  # hot-side excursion: sample of the step to HOT_TC; record length
+EXC_PARTS = (300, 500, 400)     # cold excursion: samples inside, outside, inside the range
+STARTUP_SHARE = 0.625           # first share of a log used for start-up; the rest is the test
 CA_MIN = 0.79                   # candidate output constraint, mol/L: steady-state Ca at the upper edge of
                                 # the range (0.787 at 303.0 K) rounded up; tested in process_facts
 SENSITIVITY = {"nominal": {}, "UA -5 % (fouling)": {"UA": 0.95}, "UA -10 %": {"UA": 0.90},
@@ -34,9 +39,11 @@ SENSITIVITY = {"nominal": {}, "UA -5 % (fouling)": {"UA": 0.95}, "UA -10 %": {"U
                "q +10 %": {"q": 1.10}, "q -10 %": {"q": 0.90},
                "UA -5 % and Caf +5 %": {"UA": 0.95, "Caf": 1.05}}
 IGNITION_CASES = {"UA -10 %": {"UA": 0.90}, "Caf +5 %": {"Caf": 1.05}}   # limit inside the range
+IGNITION_MARGIN_K = 0.5         # the ignition test starts on the cold steady state this far below the limit
 DELAYS_MIN = (0.0, 0.3, 0.5, 1.0)  # delay between Ca crossing CA_MIN and full cooling, min
 SCENARIO = {"stationary": 0, "drift": 1, "excursion": 2, "hot": 3}       # random-stream ids
-MIN_LOG = int(np.ceil((pl.MIN_CAL_ROWS + pl.WINDOW + LAG) / 0.625))      # shortest usable log, samples
+MIN_LOG = int(np.ceil((pl.MIN_CAL_ROWS + pl.WINDOW + LAG) / STARTUP_SHARE))  # necessary, not sufficient:
+                                # rows with spikes or gaps do not count for calibration (pipeline.startup_check)
 
 
 def params(change, p0=cstr.CSTRParams()):
@@ -47,13 +54,13 @@ def params(change, p0=cstr.CSTRParams()):
 def stationary(df, seed, figs=True):
     """Start-up on the first 5/8 of the log, test on the rest."""
     y, u = df["Ca_mol_L"].to_numpy(), df["Tc_K"].to_numpy()
-    n_tr = int(0.625 * len(y))
+    n_tr = int(STARTUP_SHARE * len(y))
     truth = "Ca_true" in df
     c = pl.commission(y[:n_tr], u[:n_tr], seed=seed)
     yte, ute, tte = y[n_tr:], u[n_tr:], df["t_min"].to_numpy()[n_tr:]
     y0 = pl.first_values(yte, c["y_clean"][-1])
 
-    full = run_online(pl.identifier(c), yte, ute, y0)
+    full = run_online(pl.identifier(c, horizon=pl.HORIZON), yte, ute, y0)   # the horizon changes only var_h / regime
     ref = df["Ca_true"].to_numpy()[n_tr:] if truth else full["y_clean"]
     models = {"ARX (linear, equation error)": pl.fit_arx(c), "OE (linear, output error)": pl.LinearOE(c),
               "Kernel ridge": pl.StaticKRR(c)}
@@ -73,17 +80,20 @@ def stationary(df, seed, figs=True):
            "krr_free_run_rmse_low_ca": pl.rmse(krr, ref, low),
            "krr_free_run_rmse_elsewhere": pl.rmse(krr, ref, ~low),
            "ca_low_threshold": float(np.quantile(ref, 0.1)),
-           "window_one_step_rmse": pl.rmse(full["pred"], ref),
            "filter": {"alpha": pl.ALPHA, "threshold": {str(a): v for a, v in c["thr"].items()},
                       "n_calibration_rows": c["n_calibration"],
                       "n_flagged_test": int(full["flagged_rt"].sum()),
                       "n_flagged_test_final": int(full["flagged"].sum())}}
     if truth:
+        # diagnostic only, not part of the selection (it uses the test truth): the test free run of every
+        # admissible tuning candidate, each trained like the static model on all start-up rows
+        adm = [pl.rmse(pl.free_run(pl.StaticKRR(c, sg, lm), ref, ute), ref) for sg, lm in c["tuning"]["admissible"]]
+        res["tuning_test_check"] = {"chosen": res["models"]["Kernel ridge"]["free_run_rmse"],
+                                    "worst_admissible": float(max(adm)), "best_admissible": float(min(adm)),
+                                    "n_admissible": len(adm)}
         an = df["is_anomaly"].to_numpy()[n_tr:]
         nofilt = run_online(pl.identifier(c, use_filter=False), yte, ute, y0)
         res["filter"].update({
-            "startup": pl.precision_recall(c["flagged_rt"], df["is_anomaly"].to_numpy()[:n_tr]),
-            "startup_final": pl.precision_recall(c["flagged"], df["is_anomaly"].to_numpy()[:n_tr]),
             "one_step_rmse_with_filter": pl.rmse(full["pred"], ref),
             "one_step_rmse_without_filter": pl.rmse(nofilt["pred"], ref),
             "sweep": []})
@@ -98,6 +108,13 @@ def stationary(df, seed, figs=True):
     if figs:
         figures.filter_fig(tte, yte, full, OUT / "fig1_filter.png")
         figures.free_run_fig(tte, ref, sims, res["reference"], OUT / "fig2_free_run.png")
+    # supervisor in ordinary operation (test data, input inside the range): how often it is not normal,
+    # and before how many input changes it warns at the first opportunity (H - 2 samples ahead)
+    reg, H = full["regime"], pl.HORIZON
+    changes = [j for j in range(LAG + H, len(ute)) if ute[j] != ute[j - 1]]
+    first = [j for j in changes if reg[first_opportunity(j, H)] > 0 and reg[first_opportunity(j, H) - 1] == 0]
+    res["supervisor_test"] = {"share_not_normal": float(np.mean(reg[LAG:] > 0)),
+                              "n_input_changes": len(changes), "n_warned_first_opportunity": len(first)}
     res["checks"] = checks.run(c["Z"], c["tz"], c["sigma"], c["lam"], pl.SIGMAS, pl.LAMS, seed)
     res["checks"]["gradient_physical_max_rel_dev"] = checks.gradient_physical(models["Kernel ridge"], c["Xc"], seed)
     return res, c
@@ -167,7 +184,7 @@ def _regime_stats(regime, start, end, H):
 def excursion(c, seed, figs=True):
     """The input leaves the range the model was trained on (cold side), then comes back."""
     rng, noise_seed = data.streams(seed, SCENARIO["excursion"])
-    parts = [(300, TC_RANGE), (500, (284.0, 290.0)), (400, TC_RANGE)]
+    parts = list(zip(EXC_PARTS, (TC_RANGE, (284.0, 290.0), TC_RANGE)))
     Tc = np.concatenate([data.aprbs(n, lo, hi, 10, 60, rng) for n, (lo, hi) in parts])
     df = data.make_log(Tc, noise_seed)
     y, u, true = (df[k].to_numpy() for k in ("Ca_mol_L", "Tc_K", "Ca_true"))
@@ -176,12 +193,13 @@ def excursion(c, seed, figs=True):
                                        probe_u=PROBE_TC),
             "Sliding window": run_online(pl.identifier(c, adapt=True, horizon=pl.HORIZON), y, u, y0,
                                          probe_u=PROBE_TC)}
-    inside = np.r_[np.ones(300, bool), np.zeros(500, bool), np.ones(400, bool)]
+    n_in, n_out, n_back = EXC_PARTS
+    inside = np.r_[np.ones(n_in, bool), np.zeros(n_out, bool), np.ones(n_back, bool)]
     inside[:LAG] = False
     outside = ~inside
     outside[:LAG] = False
     res = {"outside_range": [284.0, 290.0], "th1": c["lam"], "th2": 3 * c["lam"], "horizon": pl.HORIZON,
-           "max_lead": pl.HORIZON - 2,       # an input change is first seen H - 2 samples before it
+           "max_lead": n_in - first_opportunity(n_in, pl.HORIZON),   # an input change is first seen this early
            "probe_tc": list(PROBE_TC), "runs": {}}
     an = df["is_anomaly"].to_numpy()
     for name, o in runs.items():
@@ -196,8 +214,8 @@ def excursion(c, seed, figs=True):
             "regime_share_inside": (np.bincount(o["regime"][inside], minlength=3) / inside.sum()).tolist(),
             "point_only_regime_share_outside": (np.bincount(reg_point[outside], minlength=3)
                                                 / outside.sum()).tolist(),
-            "point_only": _regime_stats(reg_point, 300, 800, pl.HORIZON),
-            "horizon": _regime_stats(o["regime"], 300, 800, pl.HORIZON),
+            "point_only": _regime_stats(reg_point, n_in, n_in + n_out, pl.HORIZON),
+            "horizon": _regime_stats(o["regime"], n_in, n_in + n_out, pl.HORIZON),
             "mean_penalty_multiplier_outside": float(np.nanmean(o["mult"][outside])),
             "one_step_rmse_inside": pl.rmse(o["pred"], true, inside),
             "one_step_rmse_outside": pl.rmse(o["pred"], true, outside),
@@ -213,22 +231,23 @@ def hot_excursion(c, seed, figs=True, cold_limit=None):
     """The input exceeds the upper edge of the range by 1 K for HOT_LEN samples, past the
     point where the cold steady state disappears, and comes back."""
     rng, noise_seed = data.streams(seed, SCENARIO["hot"])
-    Tc = np.r_[data.aprbs(300, *TC_RANGE, 10, 60, rng), np.full(HOT_LEN, HOT_TC),
-               data.aprbs(440, *TC_RANGE, 10, 60, rng)]
+    Tc = np.r_[data.aprbs(HOT_START, *TC_RANGE, 10, 60, rng), np.full(HOT_LEN, HOT_TC),
+               data.aprbs(HOT_TOTAL - HOT_START - HOT_LEN, *TC_RANGE, 10, 60, rng)]
     df = data.make_log(Tc, noise_seed)
     y, u, true, T = (df[k].to_numpy() for k in ("Ca_mol_L", "Tc_K", "Ca_true", "T_true"))
     y0 = pl.first_values(y, c["y_clean"][-1])
     runs = {"Static model": run_online(pl.identifier(c, adapt=False, horizon=pl.HORIZON), y, u, y0),
             "Sliding window": run_online(pl.identifier(c, adapt=True, horizon=pl.HORIZON), y, u, y0)}
-    hot = slice(300, 300 + HOT_LEN)
+    hot = slice(HOT_START, HOT_START + HOT_LEN)
     ca_lo = float(np.min(c["y_clean"]))
-    below = np.where(true < ca_lo)[0]
-    k0 = 300 - pl.HORIZON + 2       # first sample whose planned trajectory contains the hot input
+    below = np.where(true[HOT_START:] < ca_lo)[0] + HOT_START      # from the step on, not before it
+    below_min = np.where(true[HOT_START:] < CA_MIN)[0] + HOT_START
+    k0 = first_opportunity(HOT_START, pl.HORIZON)   # first sample whose plan contains the hot input
     res = {"tc_hot": HOT_TC, "n_hot": HOT_LEN, "T_max": float(T.max()), "Ca_min": float(true.min()),
-           "T_before": float(T[299]), "Ca_end": float(true[-1]), "T_end": float(T[-1]),
-           "ca_min_startup": ca_lo, "first_opportunity": k0,
+           "T_before": float(T[HOT_START - 1]), "Ca_end": float(true[-1]), "T_end": float(T[-1]),
+           "ca_min_startup": ca_lo, "first_opportunity": k0, "hot_start": HOT_START,
            "first_sample_below_startup_ca": int(below[0]) if len(below) else None,
-           "first_sample_below_ca_min": (int(np.where(true < CA_MIN)[0][0]) if np.any(true < CA_MIN) else None),
+           "first_sample_below_ca_min": int(below_min[0]) if len(below_min) else None,
            "runs": {}}
     for name, o in runs.items():
         reg = o["regime"]
@@ -238,7 +257,7 @@ def hot_excursion(c, seed, figs=True, cold_limit=None):
             "normal_before": bool(reg[k0 - 1] == 0),   # otherwise a warning cannot be attributed to 304 K
             "first_non_normal": int(nonnormal[0] + k0) if len(nonnormal) else None,
             "first_conservative": int(conservative[0] + k0) if len(conservative) else None,
-            "var_h_before_ignition": float(np.nanmax(o["var_h"][k0:300])),
+            "var_h_before_ignition": float(np.nanmax(o["var_h"][k0:HOT_START])),
             "one_step_rmse_last_200": pl.rmse(o["pred"][-200:], true[-200:])}
         # measurements replaced by the prediction in real time and restored later, during the hot step
         hid = np.where(o["flagged_rt"][hot] & ~o["flagged"][hot])[0] + hot.start
@@ -287,9 +306,10 @@ def process_facts():
     sens = []
     for name, ch in SENSITIVITY.items():
         lim, ca, T = cstr.saddle_node(params(ch))
-        sens.append({"case": name, "tc_limit": lim, "ca_at_limit": ca, "T_at_limit": T,
-                     "ca_min_excludes_limit": bool(CA_MIN > ca)})
-    worst = max(r["ca_at_limit"] for r in sens)
+        fold = bool(np.isfinite(lim))      # False: a single steady state at every Tc, nothing to ignite
+        sens.append({"case": name, "fold": fold, "tc_limit": lim if fold else None,
+                     "ca_at_limit": ca if fold else None, "T_at_limit": T if fold else None,
+                     "ca_min_excludes_limit": bool(CA_MIN > ca) if fold else None})
     # feed-concentration increase at which Ca at the limit reaches CA_MIN
     caf_rise = {name: float(brentq(lambda m: cstr.saddle_node(params({**ch, "Caf": m}))[1] - CA_MIN, 1.0, 1.3)
                             - 1.0)
@@ -298,7 +318,7 @@ def process_facts():
     for name, ch in IGNITION_CASES.items():
         p = params(ch)
         lim = cstr.saddle_node(p)[0]
-        start = round(lim - 0.5, 2)
+        start = round(lim - IGNITION_MARGIN_K, 2)
         ign.append({"case": name, "tc_limit": lim, "tc_start": start, "tc_step": TC_RANGE[1],
                     "ca_start": float(cstr.steady_states(start, p)[0][0]),
                     "runs": [{"delay_min": d, **_ignition(p, start, TC_RANGE[1], d)} for d in DELAYS_MIN]})
@@ -308,9 +328,8 @@ def process_facts():
         hot.append({"Ca": float(ca), "T": float(T), "max_real_eig": float(np.max(eig.real)),
                     "eig": [str(np.round(e, 3)) for e in eig]})
     return {"cold_branch_limit_K": sens[0]["tc_limit"], "steady_states": rows, "limit_sensitivity": sens,
-            "ca_min_constraint": CA_MIN, "ca_margin_to_worst_limit": CA_MIN - worst,
-            "ca_constraint_above_data_edge": bool(CA_MIN >= rows[-1]["Ca"]),
-            "caf_rise_breaking_ca_min": caf_rise, "ignition_delay": ign, "cool_tc": TC_RANGE[0],
+            "ca_min_constraint": CA_MIN, "caf_rise_breaking_ca_min": caf_rise, "ignition_delay": ign,
+            "ignition_margin_K": IGNITION_MARGIN_K, "cool_tc": TC_RANGE[0],
             "steady_states_at_hot_tc": hot, "saddle_node_check": checks.saddle_node()}
 
 
@@ -332,20 +351,26 @@ def main():
     args = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     settings = {"window": pl.WINDOW, "refit_every": pl.REFIT_EVERY, "alpha": pl.ALPHA,
-                "n_jump": N_JUMP, "refit_every_jump": REFIT_EVERY_JUMP, "lags": [2, 2], "horizon": pl.HORIZON,
+                "n_jump": N_JUMP, "refit_every_jump": REFIT_EVERY_JUMP, "lags": [NA, NB], "horizon": pl.HORIZON,
                 "tc_range": list(TC_RANGE), "median_window": data.MEDIAN_WINDOW, "loo_tol": pl.LOO_TOL,
-                "holdout": pl.HOLDOUT, "fr_tol": pl.FR_TOL, "hot_tc": HOT_TC}
-    if args.data:
-        df = pd.read_csv(args.data)
-        ts = data.validate_log(df, MIN_LOG)
-        summary = {"simulated": False, "sampling_min": ts, "settings": settings, "data": data.describe(df)}
-        summary["stationary"], _ = stationary(df, args.seed)
-    else:
-        process = process_facts()
-        s, df = simulated_run(args.seed, cold_limit=process["cold_branch_limit_K"])
-        df.to_csv(OUT / "raw_log.csv", index=False)
-        summary = {"simulated": True, "sampling_min": data.TS, "settings": settings, **s,
-                   "process": process}
+                "holdout": pl.HOLDOUT, "fr_tol": pl.FR_TOL, "hot_tc": HOT_TC, "anomaly_rate": data.ANOMALY_RATE,
+                "startup_share": STARTUP_SHARE, "min_cal_rows": pl.MIN_CAL_ROWS}
+    # one BLAS thread, as in run_seeds.py: the reference run and the seed spread are computed the same
+    # way (with more threads the summation order changes and the filter threshold moves in the 3rd digit)
+    with threadpool_limits(1):
+        if args.data:
+            df = pd.read_csv(args.data)
+            ts = data.validate_log(df, MIN_LOG)
+            n_tr = int(STARTUP_SHARE * len(df))
+            pl.startup_check(df["Ca_mol_L"].to_numpy()[:n_tr], df["Tc_K"].to_numpy()[:n_tr], STARTUP_SHARE)
+            summary = {"simulated": False, "sampling_min": ts, "settings": settings, "data": data.describe(df)}
+            summary["stationary"], _ = stationary(df, args.seed)
+        else:
+            process = process_facts()
+            s, df = simulated_run(args.seed, cold_limit=process["cold_branch_limit_K"])
+            df.to_csv(OUT / "raw_log.csv", index=False)
+            summary = {"simulated": True, "sampling_min": data.TS, "settings": settings, **s,
+                       "process": process}
     (OUT / "metrics.json").write_text(json.dumps(summary, indent=2))
     seeds = OUT / "seeds.json"
     write_report(summary, OUT / "report.md",
