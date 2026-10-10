@@ -61,7 +61,14 @@ SEED_METRICS = [
     ("exc_window_lead_return", "Cold excursion, window: warning before return, samples", 0, False),
     ("exc_window_back_to_normal", "Cold excursion, window: samples to normal after leaving", 0, False),
     ("exc_static_nonnormal", "Cold excursion, static: time outside not normal", 1, True),
-    ("hot_var_before_over_th1", "Hot side: largest planned-trajectory variance before ignition / th1", 2, False),
+    ("sup_test_share_not_normal", "Ordinary operation (test data), window supervisor: time not normal", 1, True),
+    ("hot_var_before_over_th1_window", "Hot side, window: largest planned-trajectory variance before ignition / th1",
+     2, False),
+    ("hot_var_before_over_th1_static", "Hot side, static: the same", 2, False),
+    ("hot_hidden_window", "Hot side, window: measurements replaced in real time during the step, later restored",
+     0, False),
+    ("hot_hidden_max_overstatement_window", "Hot side, window: largest overstatement of Ca by those replacements",
+     2, False),
     ("hot_warning_lag_window", "Hot side, window: first warning relative to Ca leaving the start-up range, "
                                "samples (negative = before)", 0, False),
     ("hot_warning_lag_static", "Hot side, static: the same", 0, False),
@@ -74,11 +81,17 @@ def write_report(s, path, seeds=None):
     names = list(st["models"])
     krr = st["models"]["Kernel ridge"]
     nj = cfg["n_jump"]
+    n_sec = [0]
+
+    def sec(title):
+        n_sec[0] += 1
+        return f"## {n_sec[0]}. {title}"
+
     L = ["# Adaptive kernel model of a CSTR: validation report", "",
          "Process: continuous stirred-tank reactor, exothermic reaction A -> B. "
          "Input: coolant temperature Tc. Output: concentration Ca. All errors are in mol/L.",
          ("Data: simulated experiments on the textbook model (Henson & Seborg, 1997) with sensor noise, "
-          "isolated spikes in 2 % of the samples and a logger gap added on purpose."
+          f"isolated spikes in {100 * cfg['anomaly_rate']:g} % of the samples and a logger gap added on purpose."
           if s["simulated"] else "Data: supplied log file."),
          (f"Sections 1-7 are one realisation (seed {s.get('seed', 0)}); section 8 repeats the experiments "
           "over many seeds." if s["simulated"] and seeds else ""), "",
@@ -87,10 +100,12 @@ def write_report(s, path, seeds=None):
          f"2. kernel ridge regression (KRR) on a sliding window of {cfg['window']} samples is the process model;",
          "3. a Gaussian-process (GP) supervisor measures how far the trajectory planned from the current "
          "operating point is from the training data.",
-         "", "## 1. Data", "",
+         "", sec("Data"), "",
          f"- Samples: {d['n_samples']}, sampling period {ts:g} min; missing values: {d['n_missing']}.",
          f"- Estimated sensor noise: {st['noise_std_est']:.5f} (standard deviation; second differences, "
-         "robust scale with outlier trimming).",
+         "robust scale with outlier trimming). Recording step of Ca (smallest non-zero change): "
+         f"{d['ca_recording_step']:.2g}; a step not finer than the noise is refused, because the estimate "
+         "would then be quantised.",
          f"- Input range: {d['input_min']:.1f} to {d['input_max']:.1f} K, {d['input_levels']} distinct levels; "
          f"the least-visited tenth of the range holds {100 * d['input_emptiest_decile_share']:.1f} % of samples.",
          f"- Start-up (cleaning, tuning, threshold calibration, first model): first {st['n_startup']} samples. "
@@ -99,7 +114,7 @@ def write_report(s, path, seeds=None):
     # ---------------------------------------------------------------- 2. filter
     f = st["filter"]
     n_rt, n_fin = f["n_flagged_test"], f["n_flagged_test_final"]
-    L += ["", "## 2. Level 1: anomaly filter", "",
+    L += ["", sec("Level 1: anomaly filter"), "",
           "A measurement is rejected when it differs from the SVR one-step prediction by more than a threshold; "
           "the rejected value is replaced by the model prediction in the history. "
           "The threshold is calibrated on start-up data so that a chosen share of normal samples is rejected: "
@@ -143,7 +158,7 @@ def write_report(s, path, seeds=None):
 
     # ---------------------------------------------------------------- 3. model
     tu = st["tuning"]
-    L += ["## 3. Level 2: process model", "",
+    L += [sec("Level 2: process model"), "",
           "KRR and two linear references predict the next sample of Ca from the last two samples of Ca and Tc: "
           "ARX (least squares on the one-step error) and OE (least squares on the free-run error).",
           f"Kernel width {st['sigma']:.2f} and regularisation {st['lam']:.4f} (normalised units) were chosen in two "
@@ -157,7 +172,17 @@ def write_report(s, path, seeds=None):
           "the narrowest kernel are taken: the smoothest model whose uncertainty still grows quickly away from the data. "
           f"The chosen setting: LOO {tu['chosen']['loo_over_min']:.4f} times the minimum, held-out free-run RMSE "
           f"{tu['chosen']['holdout_free_run_rmse']:.4f}; the LOO-minimum setting (width {tu['loo_minimum']['sigma']:.2f}, "
-          f"regularisation {tu['loo_minimum']['lam']:.1e}) gives {tu['loo_minimum']['holdout_free_run_rmse']:.4f}.",
+          f"regularisation {tu['loo_minimum']['lam']:.1e}) gives {tu['loo_minimum']['holdout_free_run_rmse']:.4f}. "
+          f"The free-run stage {'changed' if tu['changed_by_free_run'] else 'did not change'} the choice the same rule "
+          "makes from the LOO candidates alone."
+          + (" The LOO minimum lies on the edge of the grid: the one-step error keeps falling towards weaker "
+             "regularisation, so the candidates are counted from the edge." if tu["loo_min_on_grid_edge"] else "")
+          + f" The kernel model is then fitted on all {tu['n_rows']} start-up rows, like the "
+          "linear references; only the LOO search uses the subset.",
+          (f"Check against the test truth, not used for the choice: the {st['tuning_test_check']['n_admissible']} "
+           f"admissible candidates, each fitted on all start-up rows, give a free-run RMSE from "
+           f"{st['tuning_test_check']['best_admissible']:.4f} to {st['tuning_test_check']['worst_admissible']:.4f}; "
+           f"the chosen one {st['tuning_test_check']['chosen']:.4f}." if "tuning_test_check" in st else ""),
           f"Errors are measured against the {st['reference']}. "
           "Free-run: the model is fed its own predictions, as inside a controller.", "",
           "| Model | One-step RMSE | Free-run RMSE | Free-run max error | Free-run fit |", "|---|---|---|---|---|"]
@@ -182,7 +207,7 @@ def write_report(s, path, seeds=None):
         pr = s["process"]
         rows = pr["steady_states"]
         ca_min = pr["ca_min_constraint"]
-        L += ["## 4. Operating range and stability of the reactor", "",
+        L += [sec("Operating range and stability of the reactor"), "",
               "Steady states of the simulated reactor on the cold (low-temperature) branch, computed from the model "
               "equations:", "",
               "| Tc, K | Ca, mol/L | Gain dCa/dTc, mol/(L K) | Slowest time constant, min | Steady states |",
@@ -204,9 +229,10 @@ def write_report(s, path, seeds=None):
               "", "The saddle-node point under changes of the process parameters:", "",
               f"| Parameters | Tc at the limit, K | Ca at the limit, mol/L | T at the limit, K | "
               f"Ca >= {ca_min:.2f} excludes the limit |", "|---|---|---|---|---|"]
-        L += [f"| {r['case']} | {r['tc_limit']:.2f} | {r['ca_at_limit']:.4f} | {r['T_at_limit']:.1f} | "
-              f"{'yes' if r['ca_min_excludes_limit'] else 'no'} |" for r in pr["limit_sensitivity"]]
-        sens = pr["limit_sensitivity"]
+        L += [(f"| {r['case']} | {r['tc_limit']:.2f} | {r['ca_at_limit']:.4f} | {r['T_at_limit']:.1f} | "
+               f"{'yes' if r['ca_min_excludes_limit'] else 'no'} |") if r["fold"] else
+              f"| {r['case']} | no limit: one steady state at every Tc | | | |" for r in pr["limit_sensitivity"]]
+        sens = [r for r in pr["limit_sensitivity"] if r["fold"]]
         inside = [r["case"] for r in sens if r["tc_limit"] < top["Tc"]]
         fail = [r["case"] for r in sens if not r["ca_min_excludes_limit"]]
         Ts = [r["T_at_limit"] for r in sens]
@@ -219,9 +245,10 @@ def write_report(s, path, seeds=None):
               f"brings Ca at the limit to {ca_min:.2f} (by {100 * cr['UA -10 %']:.2f} % with 10 % less heat transfer); "
               "beyond that the bound admits inputs at which the cold steady state no longer exists"
               + (f" (cases: {', '.join(fail)})." if fail else "."),
-              f"- T at the limit stays between {min(Ts):.1f} and {max(Ts):.1f} K in all cases; if the reactor "
+              f"- T at the limit stays between {min(Ts):.1f} and {max(Ts):.1f} K in all cases with a limit; if the reactor "
               "temperature is measured, it is a candidate for a constraint (not tested here).",
-              "", f"Ca is also a late indicator. Open-loop test: from the cold steady state 0.5 K below the limit the "
+              "", f"Ca is also a late indicator. Open-loop test: from the cold steady state {pr['ignition_margin_K']:g} K "
+              "below the limit the "
               f"input steps to {pr['ignition_delay'][0]['tc_step']:.1f} K (inside the allowed range); a given time after "
               f"the true Ca falls to {ca_min:.2f}, the input drops at once to {pr['cool_tc']:.1f} K, the strongest cooling "
               "in the range. Peak reactor temperature, K:", "",
@@ -236,8 +263,9 @@ def write_report(s, path, seeds=None):
               "Requirements that follow from this report:",
               "- an input bound with a margin to the limit for the worst admissible set of process parameters, "
               "which has to be stated (the table above);",
-              "- protective constraints fed with the raw measurement: the filter can replace up to "
-              f"{nj - 1} samples of a fast fall by predictions before it recognises a process change (section 7);",
+              "- protective constraints fed with the raw measurement: during a fast fall the filter replaces up to "
+              f"{nj - 1} samples in a row by predictions before it recognises a process change, and such runs repeat "
+              "(section 7);",
               "- the supervisor's penalty increase must not slow down protective moves: on the hot side it rises "
               "while Ca is already falling (section 7);",
               "- a closed-loop test on the cases of the table.", ""]
@@ -246,7 +274,7 @@ def write_report(s, path, seeds=None):
     if "drift" in s:
         dr = s["drift"]
         S = dr["strategies"]
-        L += ["## 5. Slow drift of the process", "",
+        L += [sec("Slow drift of the process"), "",
               f"Catalyst activity falls linearly to {100 * dr['k0_end']:.0f} % over {dr['n_online']} samples. "
               "The steady-state Ca at the end is higher by " + ", ".join(
                   f"{v:.3f} at {float(k):.0f} K" for k, v in dr["ca_shift_at_k0_end"].items()) + ".",
@@ -281,7 +309,7 @@ def write_report(s, path, seeds=None):
         lo, hi = ex["outside_range"]
         H = ex["horizon"]
         pt = lambda r: f"{100 * sum(r[1:]):.0f} %"
-        L += ["## 6. Level 3: leaving the training range (cold side)", "",
+        L += [sec("Level 3: leaving the training range (cold side)"), "",
               f"The coolant temperature moves to {lo:.0f}-{hi:.0f} K, never seen during start-up, and returns. "
               f"The supervisor receives the largest GP variance along the free-run of the model over {H} "
               f"samples ({H * ts:g} min) under the planned input; in this open-loop test the plan is "
@@ -338,14 +366,15 @@ def write_report(s, path, seeds=None):
         th1 = s["excursion"]["th1"] if "excursion" in s else None
         k0 = hx["first_opportunity"]
         ca_min = s["process"]["ca_min_constraint"] if "process" in s else None
-        L += ["## 7. Hot side: beyond the stability limit", "",
+        L += [sec("Hot side: beyond the stability limit"), "",
               f"The coolant temperature is held at {hx['tc_hot']:.1f} K, {hx['tc_hot'] - cfg['tc_range'][1]:g} K above "
               f"the identified range and beyond the saddle-node point, for {hx['n_hot']} samples "
-              f"({hx['n_hot'] * ts:g} min, from sample 300), then returns.",
+              f"({hx['n_hot'] * ts:g} min, from sample {hx['hot_start']}), then returns.",
               "- The reactor ignites: "
               + (f"the true Ca falls below {ca_min:.2f} at sample {hx['first_sample_below_ca_min']}; " if ca_min else "")
               + f"it leaves the start-up range (below {hx['ca_min_startup']:.3f}) at sample "
-              f"{hx['first_sample_below_startup_ca']}, {hx['first_sample_below_startup_ca'] - 300} samples after the step. "
+              f"{hx['first_sample_below_startup_ca']}, {hx['first_sample_below_startup_ca'] - hx['hot_start']} samples "
+              "after the step. "
               f"Ca falls to {hx['Ca_min']:.3f} and the reactor temperature rises from {hx['T_before']:.1f} to "
               f"{hx['T_max']:.1f} K. After the return it settles back on the cold branch (Ca {hx['Ca_end']:.3f}, "
               f"T {hx['T_end']:.1f} K).",
@@ -368,16 +397,20 @@ def write_report(s, path, seeds=None):
               "| Largest overstatement of Ca by those replacements (value passed on - measurement), mol/L | " + " | ".join(
                   _f(R[n]["hidden_max_overstatement"]) for n in ("Static model", "Sliding window")) + " |",
               "", "A warning only raises the move penalty; it does not stop the input. While Ca is falling, the filter "
-              f"may replace up to {nj - 1} measurements in a row by a prediction (of the model, or of the trend in jump mode) "
-              "before the run is recognised as a process change, and the conservative regime doubles the move penalty. Both act against a protective move, so the "
-              "supervisor is not a substitute for hard constraints (section 4); section 8 shows how often it warns in time.",
+              f"replaces up to {nj - 1} measurements in a row by a prediction (of the model, or of the trend in jump mode) "
+              "before the run is recognised as a process change, and such runs repeat: here "
+              + " and ".join(f"{len(R[n]['hidden_in_real_time'])} measurements ({n.lower()})"
+                             for n in ("Static model", "Sliding window"))
+              + " were replaced during the step. The conservative regime doubles the move penalty. Both act against a "
+              "protective move, so the supervisor is not a substitute for hard constraints (section 4)"
+              + ("; section 8 shows how often it warns in time." if seeds else "."),
               "", "![hot side](fig5_hot_side.png)", ""]
 
     # ---------------------------------------------------------------- 8. seeds
     if seeds:
         P = seeds["per_seed"]
         n = seeds["n_seeds"]
-        L += [f"## 8. Spread over {n} seeds", "",
+        L += [sec(f"Spread over {n} seeds"), "",
               f"All simulated experiments repeated with seeds 0-{n - 1} (new input sequences, noise, "
               "spikes and start-up for each seed; every experiment of every seed has its own random stream). "
               "Median [25th; 75th percentile]:", "",
@@ -393,29 +426,43 @@ def write_report(s, path, seeds=None):
                              sum(r[f"hot_first_warning_{key}"] == r["hot_first_opportunity"]
                                  and r[f"hot_normal_before_{key}"] for r in P))
         first_ret = sum(r["exc_window_lead_return"] == r["exc_max_lead"] for r in P)
+        n_chg, n_warn = sum(r["sup_test_changes"] for r in P), sum(r["sup_test_warned_first"] for r in P)
         oe_better = sum(r["oe_over_krr"] < 1 for r in P)
         lams, counts = np.unique([r["lam"] for r in P], return_counts=True)
         worst_ratio = max(r["tune_worst_candidate_free_run"] / r["tune_best_candidate_free_run"] for r in P)
         n_excl = sum(r["tune_n_candidates"] - r["tune_n_admissible"] > 0 for r in P)
+        n_changed = sum(r["tune_changed_by_free_run"] for r in P)
+        n_edge = sum(r["tune_loo_min_on_edge"] for r in P)
+        div = [r for r in P if r["tune_test_worst_admissible"] > 10 * r["krr_free_run"]]
         L += ["", "Hot side: the supervisor warned at least "
               f"{lead_min} samples ({lead_min * ts:g} min) before Ca left the start-up range in "
               + "; ".join(f"{v[0]} of {n} seeds with the {k} ({v[2]} of them at the first opportunity; "
                           f"{_seeds(v[1])} not counted because it was already not normal before)" for k, v in hot.items())
               + ". Even when it warns, it only raises the move penalty.",
+              f"For comparison, in ordinary operation (test data, input inside the range) the window supervisor warned "
+              f"at the first opportunity before {n_warn} of {n_chg} input changes ({100 * n_warn / max(n_chg, 1):.1f} %), "
+              "all seeds together.",
               f"Cold excursion, sliding window: the warning before the input returns came at the first opportunity "
               f"({seeds['per_seed'][0]['exc_max_lead']} samples before) in {first_ret} of {n} seeds.",
               "Selected regularisation (it also sets the supervisor thresholds): " + ", ".join(
                   f"{l:.1e} in {_seeds(c)}" for l, c in zip(lams, counts)) + ".",
-              f"Tuning: the free-run stage removed candidates in {n_excl} of {n} seeds; the worst LOO candidate had "
-              f"{worst_ratio:.0f} times the best held-out free-run RMSE. The chosen setting stays within "
-              f"{100 * cfg['fr_tol']:.0f} % of the best by construction (largest ratio "
-              f"{max(r['tune_chosen_over_best'] for r in P):.2f}).",
+              f"Tuning: the free-run stage removed candidates in {n_excl} of {n} seeds and changed the choice in "
+              f"{n_changed}; the worst LOO candidate had {worst_ratio:.0f} times the best held-out free-run RMSE. The chosen "
+              f"setting stays within {100 * cfg['fr_tol']:.0f} % of the best by construction (largest ratio "
+              f"{max(r['tune_chosen_over_best'] for r in P):.2f}). The LOO minimum lay on the edge of the grid in "
+              f"{n_edge} of {n} seeds.",
+              "Check against the test truth, not used for the choice: the chosen setting's free-run RMSE was at most "
+              f"{max(r['krr_free_run'] for r in P):.4f} in every seed, but in {len(div)} of {n} seeds an admissible "
+              "candidate gave more than 10 times the chosen setting's error"
+              + (f" (up to {max(r['tune_test_worst_admissible'] for r in div):.2f})" if div else "")
+              + ". One held-out block does not rank the candidates reliably; the outcome also rests on taking the "
+              "strongest admissible regularisation.",
               f"The linear OE model was more accurate than the kernel model in {oe_better} of {n} seeds.", ""]
 
     # ---------------------------------------------------------------- 9-11
     c = st["checks"]
     sn = s["process"]["saddle_node_check"] if "process" in s else None
-    L += [f"## {9 if seeds else 8}. Numerical self-checks", "",
+    L += [sec("Numerical self-checks"), "",
           f"- Analytical gradient against central differences: largest relative deviation {c['gradient_max_rel_dev']:.1e} "
           f"(normalised units), {c['gradient_physical_max_rel_dev']:.1e} (physical units, as needed for MPC).",
           f"- Closed-form leave-one-out residuals against actual refits: largest deviation {c['loo_max_abs_dev']:.1e}; "
@@ -427,7 +474,7 @@ def write_report(s, path, seeds=None):
                  f"{sn['df_dT']:.1e} K/min (central differences).")
     L += ["- These checks confirm that the code matches the formulas; they do not show that the GP variance is a "
           "calibrated error estimate.",
-          "", f"## {10 if seeds else 9}. Design choices for a dynamic process", "",
+          "", sec("Design choices for a dynamic process"), "",
           f"- The model is dynamic (NARX with {cfg['lags'][0]} past outputs and {cfg['lags'][1]} past inputs), not a static input-output map.",
           f"- Anomaly threshold: calibrated to reject {100 * cfg['alpha']:.1f} % of normal samples on start-up data "
           "(out-of-sample residual quantile).",
@@ -440,10 +487,19 @@ def write_report(s, path, seeds=None):
           f"{100 * cfg['fr_tol']:.0f} % of the best free run on the held-out {100 * cfg['holdout']:.0f} % of the start-up "
           "block; among those, the strongest regularisation and then the narrowest kernel.",
           "- A rejected or missing sample is replaced by the model prediction in the regressor history.",
-          "", f"## {11 if seeds else 10}. Limits", "",
-          f"- Validated for Tc between {d['input_min']:.1f} and {d['input_max']:.1f} K at a sampling period of {ts:g} min.",
-          "- Simulation study on a textbook process; no plant data.",
-          "- The supervisor's penalty multiplier is computed but not yet used: there is no controller in this part.",
+          "", sec("Limits"), "",
+          f"- Validated for Tc between {d['input_min']:.1f} and {d['input_max']:.1f} K at a sampling period of {ts:g} min."]
+    if s["simulated"]:
+        L += ["- Simulation study on a textbook process; no plant data."]
+    else:
+        L += ["- Supplied log without a noise-free reference: errors are measured against the cleaned measurements, "
+              "and the filter cannot be scored without known anomalies."]
+    L += ["- The supervisor's penalty multiplier is computed but not yet used: there is no controller in this part. "
+          "Its thresholds follow the selected regularisation"
+          + (" (section 6)" if "excursion" in s else "") + ", so how often it leaves normal depends on that choice.",
           "- Anomalies are isolated spikes only; a sensor fault that lasts several samples is treated as a process change.",
+          "- A supplied log must record Ca with a step finer than its noise, and its start-up block must leave at least "
+          f"{cfg.get('min_cal_rows', 'enough')} clean rows for threshold calibration after the first window; both are "
+          "checked before fitting, and the shortfall is reported.",
           ""]
     path.write_text("\n".join(L))

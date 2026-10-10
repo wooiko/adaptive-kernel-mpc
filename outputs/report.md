@@ -13,7 +13,7 @@ The identification system has three levels that share one RBF kernel:
 ## 1. Data
 
 - Samples: 8000, sampling period 0.1 min; missing values: 8.
-- Estimated sensor noise: 0.00197 (standard deviation; second differences, robust scale with outlier trimming).
+- Estimated sensor noise: 0.00197 (standard deviation; second differences, robust scale with outlier trimming). Recording step of Ca (smallest non-zero change): 8e-07; a step not finer than the noise is refused, because the estimate would then be quantised.
 - Input range: 292.1 to 303.0 K, 232 distinct levels; the least-visited tenth of the range holds 7.3 % of samples.
 - Start-up (cleaning, tuning, threshold calibration, first model): first 5000 samples. Test: last 3000 samples, never used for fitting, tuning or calibration.
 
@@ -21,7 +21,7 @@ The identification system has three levels that share one RBF kernel:
 
 A measurement is rejected when it differs from the SVR one-step prediction by more than a threshold; the rejected value is replaced by the model prediction in the history. The threshold is calibrated on start-up data so that a chosen share of normal samples is rejected: the filter is replayed as online (an SVR on the last 1000 rows, refitted every 20 rows, predicts the rows that follow), and the threshold is the corresponding quantile of these out-of-sample residuals, divided by the in-sample robust scale of the SVR that produced them (3744 rows). The residuals have heavier tails than a normal distribution, so the threshold is not a number of Gaussian standard deviations.
 A run of 4 rejections in a row is taken as a process change, and the rejected samples of the run are put back into the history afterwards. Two counts therefore exist: decisions as taken at each sample (real time, what a controller receives) and the final flags after these restores. The real-time count is the primary one.
-Default share: 0.5 %; threshold 3.74 times the in-sample robust scale. On the test data the filter rejected 64 samples in real time; 3 of them were restored later as parts of process changes, leaving 61.
+Default share: 0.5 %; threshold 3.73 times the in-sample robust scale. On the test data the filter rejected 64 samples in real time; 3 of them were restored later as parts of process changes, leaving 61.
 
 Precision / recall against the known injected spikes, test data. Every row is the full adaptive system. The rolling medians (window 7) have no restores, so they compare with the real-time column; they are calibrated to the same share on the same start-up data.
 
@@ -40,18 +40,19 @@ With the filter the one-step error of the window model is 0.0017; without it, 0.
 ## 3. Level 2: process model
 
 KRR and two linear references predict the next sample of Ca from the last two samples of Ca and Tc: ARX (least squares on the one-step error) and OE (least squares on the free-run error).
-Kernel width 3.16 and regularisation 0.0100 (normalised units) were chosen in two stages. (1) Exact leave-one-out (LOO) RMSE over a grid, on a random subset of the first 80 % of the start-up rows: 25 settings lie within 2 % of the best. LOO measures the one-step error, and these candidates differ in free run: on the held-out last 20 % of the start-up block (1000 samples) their free-run RMSE ranges from 0.0052 to 0.0065. (2) Settings within 50 % of the best held-out free run are admissible (25); among them the strongest regularisation and then the narrowest kernel are taken: the smoothest model whose uncertainty still grows quickly away from the data. The chosen setting: LOO 1.0167 times the minimum, held-out free-run RMSE 0.0060; the LOO-minimum setting (width 7.94, regularisation 1.0e-04) gives 0.0056.
+Kernel width 3.16 and regularisation 0.0100 (normalised units) were chosen in two stages. (1) Exact leave-one-out (LOO) RMSE over a grid, on a random subset of the first 80 % of the start-up rows: 25 settings lie within 2 % of the best. LOO measures the one-step error, and these candidates differ in free run: on the held-out last 20 % of the start-up block (1000 samples) their free-run RMSE ranges from 0.0052 to 0.0065. (2) Settings within 50 % of the best held-out free run are admissible (25); among them the strongest regularisation and then the narrowest kernel are taken: the smoothest model whose uncertainty still grows quickly away from the data. The chosen setting: LOO 1.0167 times the minimum, held-out free-run RMSE 0.0060; the LOO-minimum setting (width 7.94, regularisation 1.0e-04) gives 0.0056. The free-run stage did not change the choice the same rule makes from the LOO candidates alone. The kernel model is then fitted on all 4998 start-up rows, like the linear references; only the LOO search uses the subset.
+Check against the test truth, not used for the choice: the 25 admissible candidates, each fitted on all start-up rows, give a free-run RMSE from 0.0041 to 0.0049; the chosen one 0.0043.
 Errors are measured against the noise-free simulated output. Free-run: the model is fed its own predictions, as inside a controller.
 
 | Model | One-step RMSE | Free-run RMSE | Free-run max error | Free-run fit |
 |---|---|---|---|---|
 | ARX (linear, equation error) | 0.0018 | 0.0121 | 0.0566 | 64.3 % |
 | OE (linear, output error) | 0.0038 | 0.0100 | 0.0532 | 70.6 % |
-| Kernel ridge | 0.0016 | 0.0063 | 0.0356 | 81.5 % |
+| Kernel ridge | 0.0016 | 0.0043 | 0.0183 | 87.4 % |
 
-The kernel model's free-run error is 1.9 times smaller than ARX's and 1.6 times smaller than OE's.
+The kernel model's free-run error is 2.8 times smaller than ARX's and 2.3 times smaller than OE's.
 KRR, like ARX, is fitted on the one-step (equation) error with noisy lagged outputs in the regressor; OE is fitted on the free-run error, which removes the bias that this noise causes in the linear coefficients. KRR against ARX therefore compares nonlinear with linear under the same criterion; KRR against OE compares it with the best linear simulation model, which has the advantage of the criterion.
-The error is not uniform: where Ca is in its lowest tenth (below 0.845, the hot end, where the reactor gain is steepest) the kernel model's free-run RMSE is 0.0147; elsewhere it is 0.0045.
+The error is not uniform: where Ca is in its lowest tenth (below 0.845, the hot end, where the reactor gain is steepest) the kernel model's free-run RMSE is 0.0067; elsewhere it is 0.0039.
 
 ![free run](fig2_free_run.png)
 
@@ -87,7 +88,7 @@ The saddle-node point under changes of the process parameters:
 Neither candidate constraint follows the limit reliably:
 - a fixed bound on Tc: the limit moves inside the identified range in 6 of 10 cases (UA -5 % (fouling), UA -10 %, Tf +1 K, Caf +5 %, q +10 %, UA -5 % and Caf +5 %);
 - a lower bound Ca >= 0.79 mol/L (the steady-state Ca at the edge of the data rounded up): Ca at the limit grows with the feed concentration Caf. A rise of Caf by 3.85 % brings Ca at the limit to 0.79 (by 1.46 % with 10 % less heat transfer); beyond that the bound admits inputs at which the cold steady state no longer exists (cases: Caf +5 %, UA -5 % and Caf +5 %).
-- T at the limit stays between 333.3 and 339.1 K in all cases; if the reactor temperature is measured, it is a candidate for a constraint (not tested here).
+- T at the limit stays between 333.3 and 339.1 K in all cases with a limit; if the reactor temperature is measured, it is a candidate for a constraint (not tested here).
 
 Ca is also a late indicator. Open-loop test: from the cold steady state 0.5 K below the limit the input steps to 303.0 K (inside the allowed range); a given time after the true Ca falls to 0.79, the input drops at once to 292.0 K, the strongest cooling in the range. Peak reactor temperature, K:
 
@@ -98,7 +99,7 @@ Ca is also a late indicator. Open-loop test: from the cold steady state 0.5 K be
 
 A delay of a few samples between Ca crossing the bound and full cooling decides whether the reactor ignites. The constraints for the controller are therefore an open design question of the next part. Requirements that follow from this report:
 - an input bound with a margin to the limit for the worst admissible set of process parameters, which has to be stated (the table above);
-- protective constraints fed with the raw measurement: the filter can replace up to 3 samples of a fast fall by predictions before it recognises a process change (section 7);
+- protective constraints fed with the raw measurement: during a fast fall the filter replaces up to 3 samples in a row by predictions before it recognises a process change, and such runs repeat (section 7);
 - the supervisor's penalty increase must not slow down protective moves: on the hot side it rises while Ca is already falling (section 7);
 - a closed-loop test on the cases of the table.
 
@@ -173,7 +174,7 @@ The coolant temperature is held at 304.0 K, 1 K above the identified range and b
 | Measurements replaced in real time during the step (by the model prediction, in jump mode by the trend extrapolation) and restored later | 321, 322, 323, 334, 335, 336, 338, 339, 340, 344, 345, 346 | 318, 319, 320, 334, 335, 336, 338, 339, 340, 344, 345, 346 |
 | Largest overstatement of Ca by those replacements (value passed on - measurement), mol/L | 0.5010 | 0.5010 |
 
-A warning only raises the move penalty; it does not stop the input. While Ca is falling, the filter may replace up to 3 measurements in a row by a prediction (of the model, or of the trend in jump mode) before the run is recognised as a process change, and the conservative regime doubles the move penalty. Both act against a protective move, so the supervisor is not a substitute for hard constraints (section 4); section 8 shows how often it warns in time.
+A warning only raises the move penalty; it does not stop the input. While Ca is falling, the filter replaces up to 3 measurements in a row by a prediction (of the model, or of the trend in jump mode) before the run is recognised as a process change, and such runs repeat: here 12 measurements (static model) and 12 measurements (sliding window) were replaced during the step. The conservative regime doubles the move penalty. Both act against a protective move, so the supervisor is not a substitute for hard constraints (section 4); section 8 shows how often it warns in time.
 
 ![hot side](fig5_hot_side.png)
 
@@ -184,11 +185,11 @@ All simulated experiments repeated with seeds 0-19 (new input sequences, noise, 
 | Quantity | Median [IQR] |
 |---|---|
 | Estimated / true sensor noise | 0.998 [0.985; 1.008] |
-| Free-run RMSE, kernel model | 0.0060 [0.0052; 0.0064] |
+| Free-run RMSE, kernel model | 0.0046 [0.0043; 0.0060] |
 | Free-run RMSE, ARX | 0.0112 [0.0106; 0.0122] |
 | Free-run RMSE, OE | 0.0092 [0.0084; 0.0103] |
-| Free-run RMSE ratio ARX / kernel | 1.92 [1.60; 2.17] |
-| Free-run RMSE ratio OE / kernel | 1.60 [1.31; 1.75] |
+| Free-run RMSE ratio ARX / kernel | 2.36 [1.95; 2.60] |
+| Free-run RMSE ratio OE / kernel | 1.94 [1.61; 2.04] |
 | Tuning: held-out free-run RMSE of the chosen setting | 0.0062 [0.0052; 0.0072] |
 | Tuning: held-out free-run RMSE of the LOO-minimum setting | 0.0058 [0.0050; 0.0082] |
 | Tuning: worst held-out free-run RMSE among LOO candidates | 0.0104 [0.0065; 0.0370] |
@@ -209,22 +210,28 @@ All simulated experiments repeated with seeds 0-19 (new input sequences, noise, 
 | Cold excursion, window: warning before return, samples | 18 [18; 18] |
 | Cold excursion, window: samples to normal after leaving | 16 [10; 24] |
 | Cold excursion, static: time outside not normal | 100.0 % [99.5; 100.0] |
-| Hot side: largest planned-trajectory variance before ignition / th1 | 1.26 [0.89; 2.19] |
+| Ordinary operation (test data), window supervisor: time not normal | 5.1 % [2.6; 7.8] |
+| Hot side, window: largest planned-trajectory variance before ignition / th1 | 1.13 [0.83; 1.83] |
+| Hot side, static: the same | 1.22 [0.87; 1.76] |
+| Hot side, window: measurements replaced in real time during the step, later restored | 12 [12; 15] |
+| Hot side, window: largest overstatement of Ca by those replacements | 0.46 [0.35; 0.52] |
 | Hot side, window: first warning relative to Ca leaving the start-up range, samples (negative = before) | -39 [-43; 2] |
 | Hot side, static: the same | -40 [-43; 0] |
 
 Hot side: the supervisor warned at least 10 samples (1 min) before Ca left the start-up range in 11 of 20 seeds with the sliding window (11 of them at the first opportunity; 1 seed not counted because it was already not normal before); 12 of 20 seeds with the static model (11 of them at the first opportunity; 2 seeds not counted because it was already not normal before). Even when it warns, it only raises the move penalty.
+For comparison, in ordinary operation (test data, input inside the range) the window supervisor warned at the first opportunity before 118 of 1698 input changes (6.9 %), all seeds together.
 Cold excursion, sliding window: the warning before the input returns came at the first opportunity (18 samples before) in 19 of 20 seeds.
 Selected regularisation (it also sets the supervisor thresholds): 1.0e-05 in 1 seed, 1.0e-02 in 8 seeds, 3.2e-02 in 11 seeds.
-Tuning: the free-run stage removed candidates in 12 of 20 seeds; the worst LOO candidate had 39 times the best held-out free-run RMSE. The chosen setting stays within 50 % of the best by construction (largest ratio 1.47).
-The linear OE model was more accurate than the kernel model in 3 of 20 seeds.
+Tuning: the free-run stage removed candidates in 12 of 20 seeds and changed the choice in 2; the worst LOO candidate had 39 times the best held-out free-run RMSE. The chosen setting stays within 50 % of the best by construction (largest ratio 1.47). The LOO minimum lay on the edge of the grid in 6 of 20 seeds.
+Check against the test truth, not used for the choice: the chosen setting's free-run RMSE was at most 0.0121 in every seed, but in 3 of 20 seeds an admissible candidate gave more than 10 times the chosen setting's error (up to 0.88). One held-out block does not rank the candidates reliably; the outcome also rests on taking the strongest admissible regularisation.
+The linear OE model was more accurate than the kernel model in 1 of 20 seeds.
 
 ## 9. Numerical self-checks
 
-- Analytical gradient against central differences: largest relative deviation 2.9e-08 (normalised units), 4.2e-09 (physical units, as needed for MPC).
-- Closed-form leave-one-out residuals against actual refits: largest deviation 7.3e-14; the eigen-decomposition shortcut used for tuning against them: relative deviation 1.9e-14.
-- GP variance from the KRR factorisation against a library GP: largest deviation 2.0e-15.
-- Leave-one-out search over 90 settings on 1000 samples: 2.4 s.
+- Analytical gradient against central differences: largest relative deviation 2.9e-08 (normalised units), 1.0e-08 (physical units, as needed for MPC).
+- Closed-form leave-one-out residuals against actual refits: largest deviation 6.1e-14; the eigen-decomposition shortcut used for tuning against them: relative deviation 1.3e-14.
+- GP variance from the KRR factorisation against a library GP: largest deviation 1.6e-15.
+- Leave-one-out search over 90 settings on 1000 samples: 1.9 s.
 - Stability limit: at the computed saddle-node point |f| = 1.4e-14 and |df/dT| = 7.1e-11 K/min (central differences).
 - These checks confirm that the code matches the formulas; they do not show that the GP variance is a calibrated error estimate.
 
@@ -242,5 +249,6 @@ The linear OE model was more accurate than the kernel model in 3 of 20 seeds.
 
 - Validated for Tc between 292.1 and 303.0 K at a sampling period of 0.1 min.
 - Simulation study on a textbook process; no plant data.
-- The supervisor's penalty multiplier is computed but not yet used: there is no controller in this part.
+- The supervisor's penalty multiplier is computed but not yet used: there is no controller in this part. Its thresholds follow the selected regularisation (section 6), so how often it leaves normal depends on that choice.
 - Anomalies are isolated spikes only; a sensor fault that lasts several samples is treated as a process change.
+- A supplied log must record Ca with a step finer than its noise, and its start-up block must leave at least 1000 clean rows for threshold calibration after the first window; both are checked before fitting, and the shortfall is reported.

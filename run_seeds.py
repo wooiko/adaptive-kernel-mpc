@@ -1,6 +1,6 @@
 """Repeat the simulated experiments over many seeds and report the spread.
 
-    python run_seeds.py              # seeds 0-19, all CPU cores (about 50 minutes on 2 cores)
+    python run_seeds.py              # seeds 0-19, all CPU cores (about 60 minutes on 2 cores)
     python run_seeds.py --n 30
 
 Writes outputs/seeds.json and, if outputs/metrics.json exists (from run_demo.py),
@@ -49,6 +49,10 @@ def key_numbers(seed, cold_limit):
         "tune_chosen_over_best": (st["tuning"]["chosen"]["holdout_free_run_rmse"]
                                   / st["tuning"]["holdout_free_run_rmse_range"][0]),
         "lam_over_noise_var": st["lam"] / st["noise_var_normalised"],
+        "tune_changed_by_free_run": st["tuning"]["changed_by_free_run"],
+        "tune_loo_min_on_edge": st["tuning"]["loo_min_on_grid_edge"],
+        "tune_test_worst_admissible": st["tuning_test_check"]["worst_admissible"],
+        "tune_test_best_admissible": st["tuning_test_check"]["best_admissible"],
         "krr_free_run": krr,
         "arx_free_run": m["ARX (linear, equation error)"]["free_run_rmse"],
         "oe_free_run": m["OE (linear, output error)"]["free_run_rmse"],
@@ -70,7 +74,13 @@ def key_numbers(seed, cold_limit):
         "exc_max_lead": ex["max_lead"],
         "exc_window_back_to_normal": w["horizon"]["samples_to_normal_after_leaving"],
         "exc_static_nonnormal": sum(a["regime_share_outside"][1:]),
-        "hot_var_before_over_th1": max(hw["var_h_before_ignition"], ha["var_h_before_ignition"]) / ex["th1"],
+        "hot_var_before_over_th1_window": hw["var_h_before_ignition"] / ex["th1"],
+        "hot_var_before_over_th1_static": ha["var_h_before_ignition"] / ex["th1"],
+        "hot_hidden_window": len(hw["hidden_in_real_time"]),
+        "hot_hidden_max_overstatement_window": hw["hidden_max_overstatement"],
+        "sup_test_share_not_normal": st["supervisor_test"]["share_not_normal"],
+        "sup_test_changes": st["supervisor_test"]["n_input_changes"],
+        "sup_test_warned_first": st["supervisor_test"]["n_warned_first_opportunity"],
         "hot_warning_lag_window": lag(hw), "hot_warning_lag_static": lag(ha),
         "hot_normal_before_window": hw["normal_before"], "hot_normal_before_static": ha["normal_before"],
         "hot_first_opportunity": hx["first_opportunity"], "hot_below": below,
