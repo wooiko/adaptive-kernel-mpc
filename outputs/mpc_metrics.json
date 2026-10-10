@@ -1,0 +1,245 @@
+{
+  "seed": 0,
+  "startup_block_sha256_16": "284ba1b7775c1e39",
+  "machine": {
+    "platform": "Linux-6.18.44-fc-v114-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python": "3.13.16",
+    "blas_threads": 1
+  },
+  "settings": {
+    "Np": 20,
+    "Nc": 5,
+    "du_max": 1.0,
+    "tc_min": 292.0,
+    "tc_max": 300.54695338113373,
+    "sigma_y": 0.01,
+    "sigma_u": 1.0,
+    "rho": 1.0,
+    "rho_status": "provisional, a priori (not tuned)",
+    "asymmetric": true,
+    "n_iter": 1,
+    "osqp": {
+      "eps_abs": 1e-09,
+      "eps_rel": 1e-09,
+      "max_iter": 20000,
+      "polishing": true,
+      "verbose": false
+    },
+    "feas_tol": 1e-06,
+    "ignition_T": 350.0,
+    "band": 0.005
+  },
+  "tc_max": {
+    "tc_max": 300.54695338113373,
+    "worst_limit": 301.04695338113373,
+    "worst_vertex": {
+      "UA": 47500.0,
+      "Tf": 351.0
+    },
+    "margin": 0.5,
+    "ca_nominal_at_tc_max": 0.8682378957159894
+  },
+  "commissioning": {
+    "sigma": 3.1622776601683795,
+    "lam": 0.01
+  },
+  "S1": {
+    "adaptive K-MPC": {
+      "segments": [
+        {
+          "start": 50,
+          "setpoint": 0.8725205141049359,
+          "step": -0.04719282687371806,
+          "iae": 0.09425145761457476,
+          "settling_min": 2.8000000000000003,
+          "overshoot": 0.0,
+          "overshoot_pct": 0.0,
+          "ss_error": 0.001470952105011354
+        },
+        {
+          "start": 150,
+          "setpoint": 0.9385171167397839,
+          "step": 0.06599660263484797,
+          "iae": 0.10373270138036601,
+          "settling_min": 2.7,
+          "overshoot": 0.0017708262045355028,
+          "overshoot_pct": 2.6832081256262414,
+          "ss_error": -0.00047921306201107903
+        },
+        {
+          "start": 250,
+          "setpoint": 0.8968341149256136,
+          "step": -0.041683001814170284,
+          "iae": 0.07805453865658141,
+          "settling_min": 2.2,
+          "overshoot": 0.004900465050332925,
+          "overshoot_pct": 11.756507058152886,
+          "ss_error": -0.0006388510527700886
+        },
+        {
+          "start": 350,
+          "setpoint": 0.9410568945084915,
+          "step": 0.0442227795828779,
+          "iae": 0.07009503056321478,
+          "settling_min": 2.6,
+          "overshoot": 0.00030379877828690116,
+          "overshoot_pct": 0.6869735035934409,
+          "ss_error": -0.0011368662119470452
+        },
+        {
+          "start": 450,
+          "setpoint": 0.8802939663388798,
+          "step": -0.06076292816961171,
+          "iae": 0.13007465454258338,
+          "settling_min": 3.1,
+          "overshoot": 0.002568923218795982,
+          "overshoot_pct": 4.227780484220858,
+          "ss_error": 0.0009023657836124377
+        },
+        {
+          "start": 550,
+          "setpoint": 0.9267716086401563,
+          "step": 0.04647764230127649,
+          "iae": 0.07148495520424476,
+          "settling_min": 2.0,
+          "overshoot": 0.0031018274559413417,
+          "overshoot_pct": 6.673805516714326,
+          "ss_error": -0.0001309567598504091
+        }
+      ],
+      "iae_total": 0.5519922044629707,
+      "iae_total_on_measurement": 0.6247421538240963,
+      "tc_total_variation": 309.61302963011167,
+      "share_at_upper_limit": 0.11265432098765432,
+      "share_at_lower_limit": 0.06790123456790123,
+      "max_T": 325.3881943559009,
+      "ignition": false,
+      "violations": 0,
+      "fallback_steps": 0,
+      "n_steps": 648,
+      "statuses": {
+        "solved": 648
+      },
+      "step_ms": {
+        "median": 4.680832500071119,
+        "p95": 7.417875149997144,
+        "max": 14.688686999988931
+      },
+      "ident_ms": {
+        "median": 13.126713000019663,
+        "p95": 22.92955410005106,
+        "max": 174.11353099987537
+      },
+      "share_not_normal": 0.0,
+      "n_flagged_rt": 12,
+      "tc_levels": [
+        296.0,
+        300.29695338113373,
+        293.0,
+        298.5,
+        292.5,
+        299.79695338113373,
+        295.0
+      ]
+    },
+    "adaptive K-MPC, d held on rejected samples": {
+      "segments": [
+        {
+          "start": 50,
+          "setpoint": 0.8725205141049359,
+          "step": -0.04719282687371806,
+          "iae": 0.09795899184080056,
+          "settling_min": 2.8000000000000003,
+          "overshoot": 0.0,
+          "overshoot_pct": 0.0,
+          "ss_error": 0.0015107230854666121
+        },
+        {
+          "start": 150,
+          "setpoint": 0.9385171167397839,
+          "step": 0.06599660263484797,
+          "iae": 0.10400814553955995,
+          "settling_min": 2.7,
+          "overshoot": 0.001870640798901313,
+          "overshoot_pct": 2.8344501447314876,
+          "ss_error": -0.0006696802575988592
+        },
+        {
+          "start": 250,
+          "setpoint": 0.8968341149256136,
+          "step": -0.041683001814170284,
+          "iae": 0.07593735329309534,
+          "settling_min": 3.1,
+          "overshoot": 0.005794967182967237,
+          "overshoot_pct": 13.90247086522741,
+          "ss_error": -0.0006981611596596226
+        },
+        {
+          "start": 350,
+          "setpoint": 0.9410568945084915,
+          "step": 0.0442227795828779,
+          "iae": 0.06969441893262915,
+          "settling_min": 2.5,
+          "overshoot": 0.00020452119637692778,
+          "overshoot_pct": 0.4624792885160795,
+          "ss_error": -0.00118291055918184
+        },
+        {
+          "start": 450,
+          "setpoint": 0.8802939663388798,
+          "step": -0.06076292816961171,
+          "iae": 0.12207482230577926,
+          "settling_min": 2.9000000000000004,
+          "overshoot": 0.0023969135614957393,
+          "overshoot_pct": 3.9446972581786564,
+          "ss_error": 0.0011338739235044137
+        },
+        {
+          "start": 550,
+          "setpoint": 0.9267716086401563,
+          "step": 0.04647764230127649,
+          "iae": 0.07141686636379319,
+          "settling_min": 2.0,
+          "overshoot": 0.0032064196087094876,
+          "overshoot_pct": 6.898843077979075,
+          "ss_error": -0.0001255225014992556
+        }
+      ],
+      "iae_total": 0.5591961946282025,
+      "iae_total_on_measurement": 0.627777953193152,
+      "tc_total_variation": 304.07496280904013,
+      "share_at_upper_limit": 0.10802469135802469,
+      "share_at_lower_limit": 0.07561728395061729,
+      "max_T": 325.4082066708926,
+      "ignition": false,
+      "violations": 0,
+      "fallback_steps": 0,
+      "n_steps": 648,
+      "statuses": {
+        "solved": 648
+      },
+      "step_ms": {
+        "median": 4.743050000001858,
+        "p95": 7.361441950149583,
+        "max": 11.257867000040278
+      },
+      "ident_ms": {
+        "median": 13.389747499900295,
+        "p95": 23.92466270005111,
+        "max": 153.38093499985916
+      },
+      "share_not_normal": 0.0,
+      "n_flagged_rt": 12,
+      "tc_levels": [
+        296.0,
+        300.29695338113373,
+        293.0,
+        298.5,
+        292.5,
+        299.79695338113373,
+        295.0
+      ]
+    }
+  }
+}
