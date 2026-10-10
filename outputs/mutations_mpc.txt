@@ -20,4 +20,9 @@ caught    ctrl_raw_measurement  closed_loop.py  closed loop: controller fed the 
 caught    restore_dropped       closed_loop.py  closed loop: restored run not put back into the history
 caught    d_on_missing          mpc.py        K-MPC: d_k recomputed on a missing sample
 caught    settle_window_early   closed_loop.py  metrics: settling search starts before the event
-21 of 21 caught
+caught    d_filter_bypass       mpc.py        K-MPC: filter of the disturbance estimate bypassed
+caught    hold_on_reject_off    mpc.py        K-MPC: d_k recomputed on a rejected sample by default
+caught    supervisor_ignored    closed_loop.py  closed loop: supervisor switch ignored
+caught    pid_no_backcalc       controllers.py  PID: anti-windup back-calculation removed
+caught    nmpc_grad_sign        controllers.py  NMPC: sign of the move term in the gradient
+26 of 26 caught
