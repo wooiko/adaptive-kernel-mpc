@@ -25,4 +25,5 @@ caught    hold_on_reject_off    mpc.py        K-MPC: d_k recomputed on a rejecte
 caught    supervisor_ignored    closed_loop.py  closed loop: supervisor switch ignored
 caught    pid_no_backcalc       controllers.py  PID: anti-windup back-calculation removed
 caught    nmpc_grad_sign        controllers.py  NMPC: sign of the move term in the gradient
-26 of 26 caught
+caught    tune_ss_ignored       run_mpc.py    tuning: steady-state limit ignored in the selection
+27 of 27 caught

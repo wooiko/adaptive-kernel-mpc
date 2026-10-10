@@ -157,21 +157,40 @@ def scenario_s1(seed, tc_max):
             "missing": missing, "starts": starts, "tc_levels": tcs}
 
 
-S0_STEPS = 8                 # S0 (tuning only): eight set-point steps of S1_HOLD samples
+S0_STEPS = 8                 # S0 (tuning only): eight set-point steps of S1_HOLD samples, then a disturbance part
+S0_DIST = (100, 250, 550, 700)   # disturbance part, samples from its start: Tf step; UA ramp start, end; length
+                                 # (15 min of constant disturbance after the step and after the ramp, as in S2)
+S0_TF_STEP = 1.0             # K: size of the Tf step (random sign): the edge of the admissible set (R2)
+S0_UA_END = 0.95             # UA multiplier at the end of the ramp: the edge of the admissible set (R2)
+S0_TC_DIST = (2.0, 1.0)      # K from TC_MIN / below tc_max: Tc of the disturbance-part set-point (reachable
+                             # under the part's disturbances: they move the needed Tc by under 1.5 K, test)
 
 
 def scenario_s0(seed, tc_max):
-    """S0, tuning only (rho, PID settings, sensitivity to Np): its own random stream, set-points drawn
-    as nominal steady-state Ca at coolant temperatures uniform in [TC_MIN + 0.5, tc_max - S1_BELOW_LIMIT]."""
+    """S0, tuning only (rho, beta, PID settings, sensitivity to Np), its own random stream:
+    1. set-points drawn as nominal steady-state Ca at Tc uniform in [TC_MIN + 0.5, tc_max - S1_BELOW_LIMIT];
+    2. disturbance part (accepted 10.10.2026, so that the disturbance-filter gain beta is tuned against
+       disturbances, not only against noise): a constant set-point, a Tf step of random sign, then a UA
+       ramp, both of the largest size the admissible set allows (the tuning covers its worst case)."""
     rng, noise_seed = data.streams(seed, SCENARIO_IDS["S0"])
     tcs = rng.uniform(safety.TC_MIN + 0.5, tc_max - S1_BELOW_LIMIT, S0_STEPS + 1)
+    tc_d = rng.uniform(safety.TC_MIN + S0_TC_DIST[0], tc_max - S0_TC_DIST[1])
+    tf = float(rng.choice([-1.0, 1.0]) * S0_TF_STEP)
+    ua = S0_UA_END
     ca = np.array([safety.cold_steady_state(t)[0] for t in tcs])
-    n = S1_INIT + S1_HOLD * S0_STEPS
-    r = np.r_[np.full(S1_INIT, ca[0]), np.repeat(ca[1:], S1_HOLD)]
+    n1 = S1_INIT + S1_HOLD * S0_STEPS
+    d0, d1, d2, dn = S0_DIST
+    n = n1 + dn
+    r = np.r_[np.full(S1_INIT, ca[0]), np.repeat(ca[1:], S1_HOLD), np.full(dn, safety.cold_steady_state(tc_d)[0])]
+
+    def params(k):
+        return _with(Tf=tf if k >= n1 + d0 else 0.0, UA=_ramp(k, n1 + d1, n1 + d2, 1.0, ua))
     add, spike, missing = measurement_noise(n, noise_seed)
-    starts = [S1_INIT + S1_HOLD * i for i in range(S0_STEPS)]
-    return {"name": "S0", "plant": CSTRPlant(), "x0": np.array(safety.cold_steady_state(tcs[0])), "u0": tcs[0],
-            "r": r, "add": add, "spike": spike, "missing": missing, "starts": starts, "tc_levels": tcs}
+    starts = [S1_INIT + S1_HOLD * i for i in range(S0_STEPS)] + [n1, n1 + d0, n1 + d1, n1 + d2]
+    return {"name": "S0", "plant": CSTRPlant(params), "x0": np.array(safety.cold_steady_state(tcs[0])),
+            "u0": tcs[0], "r": r, "add": add, "spike": spike, "missing": missing, "starts": starts,
+            "tc_levels": tcs, "disturbance": {"tc_setpoint": tc_d, "tf_step": tf, "ua_end": ua},
+            "hold_segments": [len(starts) - 3, len(starts) - 1]}   # constant disturbance at their end
 
 
 def _with(p0=cstr.CSTRParams(), UA=1.0, Tf=0.0, k0=1.0, Caf=1.0):
