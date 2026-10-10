@@ -5,3 +5,4 @@ scikit-learn==1.9.1
 pandas==3.0.5
 matplotlib==3.11.2
 threadpoolctl==3.7.0
+osqp==1.1.3

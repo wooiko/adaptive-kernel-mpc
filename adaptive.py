@@ -167,6 +167,11 @@ class AdaptiveIdentifier:
         """One-step prediction of the current window model, physical units."""
         return float(self.sc.t_inv(self.krr.predict(self.sc.x(np.asarray(x, float))[None, :])[0]))
 
+    def gradient(self, x):
+        """d y[k+1] / d x of the current window model at regressor x, physical units (as
+        pipeline.StaticKRR.gradient): dy/dx_j = (st / sx_j) * df/dz_j. Used by the MPC."""
+        return self.krr.gradient(self.sc.x(np.asarray(x, float))) * self.sc.st / self.sc.sx
+
     def horizon_variance(self, x, u_plan):
         """Largest GP variance along an H-step free-run from regressor x (data up to k)
         with the planned inputs u_plan = u[k+1 .. k+H-1]. Output and input lags are
