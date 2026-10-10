@@ -16,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "outputs" / "mutations_mpc.txt"
+TIMEOUT_S = 180          # the unmutated tests take under 10 s
 
 # (id, file, original, mutated, what it imitates)
 MUTATIONS = [
@@ -54,6 +55,20 @@ MUTATIONS = [
      "    worst, v = max(lims, key=lambda t: t[0])", "Tc_max: maximum instead of minimum over the vertices"),
     ("tcmax_margin_sign", "safety.py", "    out = worst - margin", "    out = worst + margin",
      "Tc_max: margin with the sign +"),
+    ("loop_input_delay", "closed_loop.py", "X[k] = plant.step(X[k - 1], u[k - 1], k - 1)",
+     "X[k] = plant.step(X[k - 1], u[max(k - 2, 0)], k - 1)", "closed loop: plant driven by u_k-1 instead of u_k"),
+    ("d_regressor_lag", "mpc.py", "x_km1 = np.array([y[k - 1], y[k - 2], u[k - 1], u[k - 2]], float)",
+     "x_km1 = np.array([y[k - 1], y[k - 2], u[k - 2], u[k - 2]], float)",
+     "K-MPC: regressor of d_k with u_k-2 instead of u_k-1"),
+    ("ctrl_raw_measurement", "closed_loop.py", "u[k], det = controller.step(k, y_hist, u, r[k], info)",
+     "u[k], det = controller.step(k, np.where(np.isnan(y_meas), y_hist, y_meas), u, r[k], info)",
+     "closed loop: controller fed the raw measurement instead of y_rt"),
+    ("restore_dropped", "closed_loop.py", "            y_hist[idx] = y_meas[idx]\n",
+     "            pass\n", "closed loop: restored run not put back into the history"),
+    ("d_on_missing", "mpc.py", 'hold = info.get("missing", False) or', "hold = False or",
+     "K-MPC: d_k recomputed on a missing sample"),
+    ("settle_window_early", "closed_loop.py", "out = np.abs(ca[s:e] - r[s:e]) > band",
+     "out = np.abs(ca[s - 5:e] - r[s - 5:e]) > band", "metrics: settling search starts before the event"),
 ]
 
 
@@ -67,8 +82,11 @@ def copy_repo(dst):
 
 def run_tests(cwd):
     env = {**os.environ, "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
-    r = subprocess.run([sys.executable, "-m", "unittest", "tests.test_mpc"], cwd=cwd, env=env,
-                       capture_output=True, text=True, timeout=600)
+    try:
+        r = subprocess.run([sys.executable, "-m", "unittest", "tests.test_mpc"], cwd=cwd, env=env,
+                           capture_output=True, text=True, timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return False                     # a run that no longer finishes counts as failed: the mutation is caught
     return r.returncode == 0
 
 

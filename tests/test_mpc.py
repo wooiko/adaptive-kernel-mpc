@@ -11,26 +11,32 @@ import numpy as np
 from scipy.optimize import fsolve, minimize
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import closed_loop as cl  # noqa: E402
 import cstr  # noqa: E402
 import data  # noqa: E402
 import mpc  # noqa: E402
 import pipeline as pl  # noqa: E402
 import safety  # noqa: E402
-from adaptive import AdaptiveIdentifier, Scaler, regression_set  # noqa: E402
+from adaptive import AdaptiveIdentifier, Scaler, regression_set, run_online  # noqa: E402
 
-IDENT = Y = U = None
+IDENT = Y = U = SC = X0 = T0 = None
 G_REL_TOL = 1e-5          # TZ section 9: G against central differences of the free run
 
 
 def setUpModule():
     """A window model of the reactor: noise-free CSTR response to a random input over the data range."""
-    global IDENT, Y, U
+    global IDENT, Y, U, SC, X0, T0
     rng = np.random.default_rng(11)
     U = data.aprbs(400, safety.TC_MIN, 303.0, 10, 40, rng)
     Y = cstr.simulate(U, data.TS, cstr.steady_state(U[0]))[:, 0]
-    X, t, _ = regression_set(Y, U)
-    sc = Scaler().fit(X, t)
-    IDENT = AdaptiveIdentifier(3.0, 1e-4, sc, sc.x(X), sc.t(t), data.NOISE_STD, window=400)
+    X0, T0, _ = regression_set(Y, U)
+    SC = Scaler().fit(X0, T0)
+    IDENT = new_identifier()
+
+
+def new_identifier(horizon=0):
+    """A fresh window model of the module's reactor record (the identifier is changed by a closed-loop run)."""
+    return AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=400, horizon=horizon)
 
 
 def _start(rng):
@@ -408,6 +414,159 @@ class TcMax(unittest.TestCase):
         self.assertTrue(np.all(np.diff(ca) < 0))
         self.assertAlmostEqual(lo, ca[-1], places=12)
         self.assertAlmostEqual(hi, ca[0], places=12)
+
+
+class PassThrough:
+    """Identifier stand-in for the linear-plant tests: every measurement accepted as it is."""
+    horizon = 0
+
+    def step(self, x, y, u_plan=None):
+        return {"y_keep": y, "flagged": False, "restore": [], "mult": 1.0, "regime": 0, "var_h": np.nan}
+
+
+TH = np.array([1.5, -0.56, 0.02, 0.01])          # linear test plant, poles 0.7 and 0.8
+
+
+class _Kick:
+    """Wraps a controller and adds `dv` to its decision at sample `at`."""
+    def __init__(self, ctrl, at, dv): self.c, self.at, self.dv = ctrl, at, dv
+    def planned_inputs(self, u_prev, n): return self.c.planned_inputs(u_prev, n)
+
+    def step(self, k, y, u, r, info):
+        v, det = self.c.step(k, y, u, r, info)
+        return v + (self.dv if k == self.at else 0.0), det
+
+
+def _linear_loop(n=60, kick=None):
+    ctrl = mpc.KMPC(mpc.linear_model(TH), 1e3, 0.1, u_min=-1e3, du_max=1e3)
+    ctrl = _Kick(ctrl, *kick) if kick else ctrl
+    r = np.r_[np.zeros(10), np.full(n - 10, 0.5)]
+    return cl.run_loop(cl.LinearPlant(TH), np.zeros(3), PassThrough(), ctrl, r, np.zeros(n), np.zeros(n, bool), 0.0)
+
+
+class ClosedLoopTimeConvention(unittest.TestCase):
+    """Mutations: plant driven by u_k-1 instead of u_k; regressor of d_k with u_k-2 instead of u_k-1."""
+    def test_exact_model_predicts_the_next_sample(self):
+        log = _linear_loop()
+        k = np.arange(cl.LAG, len(log["r"]) - 1)
+        np.testing.assert_allclose(log["y_pred_next"][k], log["Ca"][k + 1], rtol=0, atol=1e-12)
+        self.assertLess(np.nanmax(np.abs(log["d"])), 1e-12)
+
+    def test_input_acts_on_the_next_sample_only(self):
+        K, base = 30, _linear_loop()
+        kicked = _linear_loop(kick=(K, 1.0))
+        self.assertEqual(base["Ca"][K], kicked["Ca"][K])
+        self.assertAlmostEqual(kicked["Ca"][K + 1] - base["Ca"][K + 1], TH[2], places=12)
+
+
+def _cstr_loop(n, add=None, missing=None, hold=False):
+    """Short CSTR run with the module's window model and a fresh identifier."""
+    ident = new_identifier(horizon=mpc.NP)
+    ctrl = mpc.KMPC(mpc.window_model(ident), safety.tc_max()["tc_max"], 1.0, hold_d_on_reject=hold)
+    x0 = np.array(safety.cold_steady_state(296.0))
+    r = np.r_[np.full(20, x0[0]), np.full(n - 20, x0[0] - 0.02)]
+    add = np.random.default_rng(71).normal(0, data.NOISE_STD, n) if add is None else add
+    missing = np.zeros(n, bool) if missing is None else missing
+    return cl.run_loop(cl.CSTRPlant(), x0, ident, ctrl, r, add, missing, 296.0), add, missing
+
+
+class ClosedLoopMeasurement(unittest.TestCase):
+    """Mutations: controller fed the raw measurement instead of y_rt; restored run not put back into the
+    history; d_k recomputed on a missing sample."""
+    @classmethod
+    def setUpClass(cls):
+        n = 80
+        add = np.random.default_rng(71).normal(0, data.NOISE_STD, n)
+        cls.K = 40
+        add[cls.K] += 0.05                                   # a spike of 25 noise std
+        missing = np.zeros(n, bool); missing[55:58] = True   # a short gap
+        add[65:] += 0.03                                     # a level step: rejected, then restored
+        cls.add, cls.missing = add, missing
+        cls.log, _, _ = _cstr_loop(n, add, missing)
+
+    def test_controller_gets_the_filtered_value(self):
+        log, K = self.log, self.K
+        self.assertTrue(log["flagged_rt"][K])
+        self.assertEqual(log["y_ctrl"][K], log["y_rt"][K])
+        self.assertNotAlmostEqual(log["y_ctrl"][K], log["y_meas"][K], places=3)
+        np.testing.assert_array_equal(log["y_ctrl"][cl.LAG:], log["y_rt"][cl.LAG:])
+
+    def test_future_measurements_do_not_change_past_inputs(self):
+        """P1: measurements after sample k replaced by NaN leave u[0..k] unchanged."""
+        k = 50
+        miss = self.missing.copy(); miss[k + 1:] = True
+        log2, _, _ = _cstr_loop(len(self.add), self.add, miss)
+        np.testing.assert_array_equal(log2["u"][:k + 1], self.log["u"][:k + 1])
+
+    def test_missing_sample_keeps_d(self):
+        d = self.log["d"]
+        self.assertEqual(d[55], d[54]); self.assertEqual(d[57], d[54])
+        self.assertNotEqual(d[54], d[53])
+
+    def test_filter_decisions_equal_open_loop_replay(self):
+        """The identifier inside the loop takes the same decisions as adaptive.run_online on the recorded
+        measurements and inputs (the supervisor plan differs; the filter does not use it)."""
+        log = self.log
+        self.assertTrue(log["restored"].any())
+        o = run_online(new_identifier(), log["y_meas"], log["u"], log["y_rt"][:cl.LAG])
+        np.testing.assert_array_equal(o["flagged_rt"][cl.LAG:], log["flagged_rt"][cl.LAG:])
+        np.testing.assert_allclose(o["y_rt"][cl.LAG:], log["y_rt"][cl.LAG:], rtol=0, atol=1e-12)
+
+
+class KMPCDisturbance(unittest.TestCase):
+    """Mutation: d_k recomputed on a missing sample."""
+    def test_hold_rules(self):
+        m = mpc.linear_model(TH)
+        y, u = np.array([0.1, 0.2, 0.4]), np.array([1.0, 1.0, np.nan])
+        for hold_rej, info, keeps in ((False, {"missing": True}, True), (False, {"rejected": True}, False),
+                                      (True, {"rejected": True}, True), (False, {}, False)):
+            c = mpc.KMPC(m, 1e3, 0.1, u_min=-1e3, du_max=1e3, hold_d_on_reject=hold_rej)
+            c.d = 0.123
+            c.step(2, y, u, 0.0, info)
+            if keeps:
+                self.assertEqual(c.d, 0.123)
+            else:
+                self.assertAlmostEqual(c.d, y[2] - TH @ [y[1], y[0], u[1], u[0]], places=12)
+
+
+class Metrics(unittest.TestCase):
+    """Mutation: settling search window starting before the event."""
+    def test_known_signals(self):
+        n, s = 200, 100
+        r = np.r_[np.zeros(s), np.ones(n - s)]
+        ca = r.copy()
+        ca[s:s + 30] = np.linspace(0.0, 0.99, 30)           # in the band (+-0.005) from sample s + 30 on
+        ca[s - 20:s] = 0.5                                  # out of the band before the event only
+        ca[s + 40] = 1.004                                  # inside the band
+        seg = cl.segment_metrics(ca, r, [s], n)[0]
+        self.assertEqual(seg["settling_min"], 30 * data.TS)
+        self.assertAlmostEqual(seg["overshoot"], 0.004, places=12)
+        self.assertAlmostEqual(seg["ss_error"], 0.0, places=12)
+        self.assertAlmostEqual(seg["iae"], np.sum(np.abs(ca[s:] - r[s:])) * data.TS, places=12)
+        ca2 = r + 0.01
+        seg2 = cl.segment_metrics(ca2, r, [s], n)[0]
+        self.assertAlmostEqual(seg2["iae"], 0.01 * (n - s) * data.TS, places=12)
+        self.assertIsNone(seg2["settling_min"])
+        self.assertAlmostEqual(seg2["ss_error"], 0.01, places=12)
+
+    def test_ignition_flag(self):
+        log = {"Ca": np.zeros(5), "r": np.zeros(5), "u": np.full(5, 295.0), "y_meas": np.zeros(5),
+               "fallback": np.zeros(5, bool), "status": ["solved"] * 5, "t_ctrl_ms": np.ones(5),
+               "t_ident_ms": np.ones(5), "regime": np.zeros(5, int), "flagged_rt": np.zeros(5, bool)}
+        for tmax, ign in ((349.9, False), (350.1, True)):
+            log["T"] = np.r_[330.0, 331.0, tmax, 332.0, 333.0]
+            self.assertEqual(cl.run_metrics(log, [2], 292.0, 300.0, 1.0)["ignition"], ign)
+
+
+class IgnitionThreshold(unittest.TestCase):
+    """Source of IGNITION_T: cold branch below it at Tc_max on every vertex; hot state far above it."""
+    def test_threshold_separates_the_branches(self):
+        res = safety.tc_max()
+        for v in safety.vertices(res["ranges"]):
+            self.assertLess(safety.cold_steady_state(res["tc_max"], safety.params_at(v))[1], cl.IGNITION_T)
+        hot = cstr.steady_states(cstr.saddle_node()[0] + 0.1)
+        self.assertEqual(len(hot), 1)
+        self.assertGreater(hot[0][1], cl.IGNITION_T + 10.0)
 
 
 if __name__ == "__main__":

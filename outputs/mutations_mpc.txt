@@ -14,4 +14,10 @@ caught    accept_unsolved       mpc.py        solver: result used without status
 caught    fallback_unclipped    mpc.py        fallback plan not clipped to the constraints
 caught    tcmax_max             safety.py     Tc_max: maximum instead of minimum over the vertices
 caught    tcmax_margin_sign     safety.py     Tc_max: margin with the sign +
-15 of 15 caught
+caught    loop_input_delay      closed_loop.py  closed loop: plant driven by u_k-1 instead of u_k
+caught    d_regressor_lag       mpc.py        K-MPC: regressor of d_k with u_k-2 instead of u_k-1
+caught    ctrl_raw_measurement  closed_loop.py  closed loop: controller fed the raw measurement instead of y_rt
+caught    restore_dropped       closed_loop.py  closed loop: restored run not put back into the history
+caught    d_on_missing          mpc.py        K-MPC: d_k recomputed on a missing sample
+caught    settle_window_early   closed_loop.py  metrics: settling search starts before the event
+21 of 21 caught
