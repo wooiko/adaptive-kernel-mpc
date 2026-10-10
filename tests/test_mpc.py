@@ -704,6 +704,19 @@ class OracleModel(unittest.TestCase):
         self.assertLess(np.max(np.abs(ca - ref)), 1e-7)
 
 
+class TuningRule(unittest.TestCase):
+    """Mutation: steady-state limit ignored in the selection."""
+    def test_select(self):
+        import run_mpc as rm
+        rows = [{"iae": 1.00, "tv": 50.0, "ss_max": 0.002, "violations": 0},    # best IAE, fails the limit
+                {"iae": 1.04, "tv": 40.0, "ss_max": 0.0005, "violations": 0},
+                {"iae": 1.06, "tv": 30.0, "ss_max": 0.0005, "violations": 0},
+                {"iae": 1.07, "tv": 20.0, "ss_max": 0.0005, "violations": 1}]
+        self.assertEqual(rm.select(rows)["tv"], 30.0)       # within 5 % of the best admissible (1.04)
+        with self.assertRaises(ValueError):
+            rm.select(rows[:1])
+
+
 class Scenarios(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -720,6 +733,20 @@ class Scenarios(unittest.TestCase):
             p = sc["plant"].params(k)
             lo, hi = safety.reachable_setpoints(u_max=self.lim, p=p)
             self.assertTrue(lo < sc["r"][k] < hi, k)
+
+    def test_s0_setpoint_part_unchanged_and_disturbance_reachable(self):
+        sc = cl.scenario_s0(0, self.lim)
+        n1 = cl.S1_INIT + cl.S1_HOLD * cl.S0_STEPS
+        rng, _ = data.streams(0, cl.SCENARIO_IDS["S0"])
+        tcs = rng.uniform(safety.TC_MIN + 0.5, self.lim - cl.S1_BELOW_LIMIT, cl.S0_STEPS + 1)
+        np.testing.assert_array_equal(sc["tc_levels"], tcs)
+        self.assertEqual([sc["starts"][i] for i in sc["hold_segments"]], [n1 + cl.S0_DIST[0], n1 + cl.S0_DIST[2]])
+        for k in (n1, n1 + cl.S0_DIST[0], len(sc["r"]) - 1):
+            lo, hi = safety.reachable_setpoints(u_max=self.lim, p=sc["plant"].params(k))
+            self.assertTrue(lo < sc["r"][k] < hi, k)
+        d = sc["disturbance"]
+        self.assertEqual(abs(d["tf_step"]), 1.0)
+        self.assertEqual(d["ua_end"], safety.UA_RANGE[0])
 
     def test_s3_levels_reachable_throughout(self):
         sc = cl.scenario_s3(0, self.lim)

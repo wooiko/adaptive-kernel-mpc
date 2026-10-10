@@ -35,11 +35,13 @@ TUNING_FILE = OUT / "mpc_tuning.json"
 REFERENCE_SEED = 0
 WORKERS = 2
 RHOS = (0.3, 1.0, 3.0, 10.0, 30.0)        # move weight, normalised (r0 = rho / SIGMA_U^2)
-BETAS = (0.03, 0.1, 0.3, 1.0)             # gain of the disturbance filter (1 = no filter)
+BETAS = (0.003, 0.01, 0.03, 0.1, 0.3, 1.0)  # gain of the disturbance filter (1 = no filter)
 TAU_C_FACTORS = (1, 2, 4, 8, 16)          # SIMC closed-loop time constant, multiples of the effective dead time
 NP_SENSITIVITY = (10, 20, 40)             # TZ decision R4: reported, Np stays 20
 TUNE_TOL = 0.05                           # selection on S0: settings within 5 % of the lowest IAE are candidates,
                                           # among them the smallest total variation of Tc (the smoothest input)
+SS_LIMIT = 0.001                          # mol/L: candidates must also meet the steady-state requirement of TZ 9
+                                          # (S2 threshold) on the disturbance segments of S0, not of S2 (P3)
 
 # name: (controller kind, identifier adapts (else frozen at commissioning), supervisor multiplier used)
 CONFIGS = {
@@ -114,7 +116,7 @@ def job(args):
 def scenario_extras(scen, sc, log, m):
     """Scenario-specific numbers (TZ 8)."""
     seg = m["segments"]
-    if scen == "S2":
+    if scen in ("S0", "S2"):
         return {"ss_error_max_abs_hold": max(abs(seg[i]["ss_error"]) for i in sc["hold_segments"])}
     if scen == "S4":
         fr = log["flagged_rt"] & ~sc["spike"] & ~sc["missing"]
@@ -142,9 +144,13 @@ def s4_moves(results, logs):
 # ---------------------------------------------------------------- tuning on S0
 
 def select(rows):
-    best = min(r["iae"] for r in rows)
-    cand = [r for r in rows if r["iae"] <= best * (1 + TUNE_TOL) and r.get("violations", 0) == 0]
-    return min(cand, key=lambda r: r["tv"])
+    """Admissible: no violations and steady-state error within SS_LIMIT on the S0 disturbance segments.
+    Among them: IAE within TUNE_TOL of the lowest admissible IAE, then the lowest TV of Tc."""
+    adm = [r for r in rows if r.get("violations", 0) == 0 and r["ss_max"] <= SS_LIMIT]
+    if not adm:
+        raise ValueError(f"no setting on the grid meets the steady-state limit {SS_LIMIT} mol/L on S0")
+    best = min(r["iae"] for r in adm)
+    return min([r for r in adm if r["iae"] <= best * (1 + TUNE_TOL)], key=lambda r: r["tv"])
 
 
 def tune(c, lim):
@@ -161,9 +167,9 @@ def tune(c, lim):
     with ProcessPoolExecutor(WORKERS) as ex:
         out = list(ex.map(job, mpc_jobs + pid_jobs))
     grid = [{"rho": j[5]["rho"], "beta": j[5]["beta"], "iae": o[2]["iae_total"], "tv": o[2]["tc_total_variation"],
-             "violations": o[2]["violations"]} for j, o in zip(mpc_jobs, out)]
-    pid_res = [{**p, "iae": o[2]["iae_total"], "tv": o[2]["tc_total_variation"], "violations": o[2]["violations"]}
-               for p, o in zip(pid, out[len(mpc_jobs):])]
+             "ss_max": o[2]["ss_error_max_abs_hold"], "violations": o[2]["violations"]} for j, o in zip(mpc_jobs, out)]
+    pid_res = [{**p, "iae": o[2]["iae_total"], "tv": o[2]["tc_total_variation"], "ss_max": o[2]["ss_error_max_abs_hold"],
+                "violations": o[2]["violations"]} for p, o in zip(pid, out[len(mpc_jobs):])]
     m, p = select(grid), select(pid_res)
     s = {"rho": m["rho"], "beta": m["beta"], "pid": {k: p[k] for k in ("tau_c", "Kc", "tau_i")}}
     with ProcessPoolExecutor(WORKERS) as ex:
@@ -172,7 +178,8 @@ def tune(c, lim):
     np_res = [{"Np": n, "iae": o[2]["iae_total"], "tv": o[2]["tc_total_variation"], "step_ms": o[2]["step_ms"]}
               for n, o in zip(NP_SENSITIVITY, np_out)]
     return {"seed": REFERENCE_SEED, "scenario": "S0",
-            "rule": f"lowest TV of Tc among settings with IAE within {TUNE_TOL:.0%} of the lowest IAE, no violations",
+            "rule": f"admissible: no violations, |steady-state error| <= {SS_LIMIT} mol/L on the S0 disturbance "
+                    f"segments; among them the lowest TV of Tc with IAE within {TUNE_TOL:.0%} of the lowest admissible IAE",
             "fopdt": fop, "mpc_grid": grid, "pid_grid": pid_res, "np_sensitivity": np_res, "chosen": s}
 
 

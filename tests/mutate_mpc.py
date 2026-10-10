@@ -80,6 +80,8 @@ MUTATIONS = [
      "self.I += self.Kc * self.ts / self.tau_i * e", "PID: anti-windup back-calculation removed"),
     ("nmpc_grad_sign", "controllers.py", "+ mpc.difference_matrix(Nc).T @ (2.0 * w * dU)",
      "- mpc.difference_matrix(Nc).T @ (2.0 * w * dU)", "NMPC: sign of the move term in the gradient"),
+    ("tune_ss_ignored", "run_mpc.py", 'r.get("violations", 0) == 0 and r["ss_max"] <= SS_LIMIT]',
+     'r.get("violations", 0) == 0]', "tuning: steady-state limit ignored in the selection"),
 ]
 
 
