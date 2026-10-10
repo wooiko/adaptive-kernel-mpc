@@ -1,0 +1,17 @@
+Mutations of part 2 (tests/mutate_mpc.py); the tests of tests/test_mpc.py must catch each.
+caught    grad_scale            adaptive.py   window-model gradient without the factor s_t/s_x
+caught    G_column_shift        mpc.py        sensitivity: b1 in the column one step later
+caught    G_sign_b2             mpc.py        sensitivity: sign of b2
+caught    regressor_u_lag       mpc.py        nominal trajectory: regressor with u_k-1 instead of u_k
+caught    d_off                 mpc.py        disturbance estimate d_k switched off
+caught    blocking_hold         mpc.py        move blocking: input held one move early
+caught    no_shift              mpc.py        nominal plan not shifted
+caught    q_no_u_prev           mpc.py        QP: term e u_k-1 lost in q
+caught    rate_first_row        mpc.py        QP: first rate row without u_k-1
+caught    mult_on_cooling       mpc.py        supervisor multiplier also on cooling moves
+caught    q_sign                mpc.py        solver: sign of q
+caught    accept_unsolved       mpc.py        solver: result used without status 'solved'
+caught    fallback_unclipped    mpc.py        fallback plan not clipped to the constraints
+caught    tcmax_max             safety.py     Tc_max: maximum instead of minimum over the vertices
+caught    tcmax_margin_sign     safety.py     Tc_max: margin with the sign +
+15 of 15 caught
