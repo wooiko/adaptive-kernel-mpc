@@ -25,10 +25,10 @@ Decided from the result files:
 
 | Check | Result | Pass |
 |---|---|---|
-| Violations of the hard input constraints, all runs of all controllers | 0 in 1040 runs over 20 seeds; 0 in the runs of outputs/mpc_metrics.json (seed 0, oracle included) | yes |
+| Violations of the hard input constraints, all runs of all controllers | 0 in 1320 runs over 20 seeds; 0 in the runs of outputs/mpc_metrics.json (seed 0, oracle included) | yes |
 | Ignition (T > 350 K) in S1, S2, S3, S4, S5a, S6, K-MPC static and K-MPC adaptive, all seeds | K-MPC static: 0 runs; K-MPC adaptive: 0 runs; highest T 330.4 K | yes |
 | S2: |steady-state error| on the true Ca <= 0.001 mol/L, both K-MPC, every seed | K-MPC static: worst 0.0008 (seed 2); K-MPC adaptive: worst 0.0053 (seed 15) | **no** |
-| Fallback plan in at most 0.1 % of the steps of each MPC configuration, all seeds of S1, S2, S3, S4, S5a, S6 together (TZ 14, D11) | highest 9 of 129760 steps (0.007 %, NMPC on the same KRR) | yes |
+| Fallback plan in at most 0.1 % of the steps of each MPC configuration, all seeds of S1, S2, S3, S4, S5a, S6 together (TZ 14, D11) | highest 9 of 129760 steps (0.007 %, K-MPC adaptive, sign gate) | yes |
 | K-MPC step time, 95th percentile <= 60 ms, one BLAS thread | highest p95 of a run 16.0 ms (K-MPC static, S1, seed 3) | yes |
 
 Decided by the tests (`python -m unittest discover -s tests`): G against central differences; QP matrices against numerical derivatives; OSQP against SciPy and the closed form; time convention; offset-free control; determinism (seed 0 of run_mpc.py and run_mpc_seeds.py, two separate runs, equal apart from the time fields: `SeedResults`); part 1 files unchanged (P12, `Part1Unchanged`); the numbers of the Part 2 section of README.md (`ReadmeNumbers`). Mutations: `tests/mutate_mpc.py`, log `outputs/mutations_mpc.txt`.
@@ -45,6 +45,8 @@ Decided by the tests (`python -m unittest discover -s tests`): G against central
 | K-MPC adaptive, no supervisor | 0.5246 [0.5201; 0.5427] | 0.6410 (seed 8) | 71.3 [67.7; 74.7] | 325.5 (seed 2) | 0 of 20 | - |
 | K-MPC adaptive | 0.5246 [0.5201; 0.5427] | 0.6410 (seed 8) | 71.3 [67.7; 74.7] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, anchored window | 0.5258 [0.5161; 0.5364] | 0.5803 (seed 2) | 70.3 [68.6; 74.3] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, sign gate | 0.5243 [0.5202; 0.5431] | 0.6755 (seed 8) | 71.3 [67.7; 74.7] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, anchored window, sign gate | 0.5258 [0.5161; 0.5365] | 0.5800 (seed 2) | 70.3 [68.6; 74.3] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 0.5240 [0.5181; 0.5315] | 0.6220 (seed 8) | 67.6 [66.3; 68.7] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
 
 **S2: Tf steps +1 K and -1 K, UA ramp to -5 %.** 20 seeds.
@@ -57,6 +59,8 @@ Decided by the tests (`python -m unittest discover -s tests`): G against central
 | K-MPC adaptive, no supervisor | 0.0772 [0.0737; 0.0887] | 0.1275 (seed 15) | 37.2 [35.7; 43.4] | 321.0 (seed 16) | 0 of 20 | - |
 | K-MPC adaptive | 0.0772 [0.0737; 0.0887] | 0.1275 (seed 15) | 37.2 [35.7; 43.4] | 321.0 (seed 16) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, anchored window | 0.0664 [0.0614; 0.0702] | 0.0805 (seed 5) | 42.1 [40.4; 44.3] | 320.9 (seed 8) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, sign gate | 0.0742 [0.0670; 0.0830] | 0.1208 (seed 16) | 36.8 [35.6; 39.7] | 321.0 (seed 16) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, anchored window, sign gate | 0.0664 [0.0614; 0.0702] | 0.0805 (seed 5) | 42.1 [40.4; 44.3] | 320.9 (seed 8) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 0.0769 [0.0737; 0.0888] | 0.1404 (seed 15) | 36.5 [35.3; 39.7] | 321.2 (seed 15) | 0 of 20 | 0.0 [0.0; 0.0] % |
 
 Largest |steady-state error| over the segments with a constant disturbance at their end (mean of the last 5 min), mol/L:
@@ -69,6 +73,8 @@ Largest |steady-state error| over the segments with a constant disturbance at th
 | K-MPC adaptive, no supervisor | 0.0009 [0.0006; 0.0023] | 0.0053 (seed 15) | 12 of 20 |
 | K-MPC adaptive | 0.0009 [0.0006; 0.0023] | 0.0053 (seed 15) | 12 of 20 |
 | K-MPC adaptive, anchored window | 0.0006 [0.0005; 0.0007] | 0.0011 (seed 5) | 19 of 20 |
+| K-MPC adaptive, sign gate | 0.0006 [0.0004; 0.0008] | 0.0035 (seed 16) | 17 of 20 |
+| K-MPC adaptive, anchored window, sign gate | 0.0006 [0.0005; 0.0007] | 0.0011 (seed 5) | 19 of 20 |
 | NMPC on the same KRR | 0.0008 [0.0006; 0.0025] | 0.0068 (seed 15) | 12 of 20 |
 
 Seeds with |steady-state error| > 0.001 mol/L, by segment (segments that end with a constant disturbance):
@@ -78,6 +84,8 @@ Seeds with |steady-state error| > 0.001 mol/L, by segment (segments that end wit
 | K-MPC static | 0 | 0 | 0 | - | 0 |
 | K-MPC adaptive | 0 | 0 | 0 | - | 8 |
 | K-MPC adaptive, anchored window | 0 | 0 | 0 | - | 1 |
+| K-MPC adaptive, sign gate | 0 | 0 | 0 | - | 3 |
+| K-MPC adaptive, anchored window, sign gate | 0 | 0 | 0 | - | 1 |
 | NMPC on the same KRR | 0 | 0 | 0 | - | 8 |
 
 **S3: k0 drift to x0.8 over 300 min, set-point changes.** 20 seeds.
@@ -90,6 +98,8 @@ Seeds with |steady-state error| > 0.001 mol/L, by segment (segments that end wit
 | K-MPC adaptive, no supervisor | 0.3523 [0.3334; 0.3736] | 0.5376 (seed 12) | 135.6 [129.7; 141.5] | 323.7 (seed 12) | 0 of 20 | - |
 | K-MPC adaptive | 0.3523 [0.3334; 0.3734] | 0.5373 (seed 12) | 135.6 [129.7; 141.5] | 323.7 (seed 12) | 0 of 20 | 0.0 [0.0; 0.2] % |
 | K-MPC adaptive, anchored window | 0.3093 [0.2944; 0.3256] | 0.3830 (seed 10) | 164.0 [159.7; 172.4] | 322.3 (seed 19) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, sign gate | 0.3558 [0.3396; 0.3865] | 0.5644 (seed 12) | 137.6 [129.3; 144.0] | 323.7 (seed 12) | 0 of 20 | 0.0 [0.0; 0.5] % |
+| K-MPC adaptive, anchored window, sign gate | 0.3093 [0.2944; 0.3259] | 0.3847 (seed 10) | 164.0 [160.0; 172.4] | 322.3 (seed 19) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 0.3457 [0.3289; 0.3740] | 0.5077 (seed 7) | 132.0 [126.3; 136.7] | 323.6 (seed 12) | 0 of 20 | 0.0 [0.0; 0.2] % |
 
 **S4: measurement faults (spikes, gap, run).** 20 seeds.
@@ -102,6 +112,8 @@ Seeds with |steady-state error| > 0.001 mol/L, by segment (segments that end wit
 | K-MPC adaptive, no supervisor | 0.1376 [0.1327; 0.1477] | 0.1604 (seed 7) | 36.6 [35.9; 37.9] | 324.6 (seed 1) | 0 of 20 | - |
 | K-MPC adaptive | 0.1376 [0.1327; 0.1477] | 0.1604 (seed 7) | 36.6 [35.9; 37.9] | 324.6 (seed 1) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, anchored window | 0.1365 [0.1336; 0.1416] | 0.1768 (seed 12) | 36.5 [35.6; 37.9] | 324.6 (seed 1) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, sign gate | 0.1406 [0.1327; 0.1499] | 0.1800 (seed 15) | 36.7 [35.9; 37.9] | 324.6 (seed 1) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, anchored window, sign gate | 0.1366 [0.1335; 0.1418] | 0.1768 (seed 12) | 36.5 [35.6; 37.9] | 324.6 (seed 1) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 0.1367 [0.1327; 0.1463] | 0.1583 (seed 7) | 36.4 [35.4; 37.8] | 324.6 (seed 1) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, no filter | 0.1689 [0.1627; 0.1865] | 0.2325 (seed 7) | 46.5 [45.4; 48.2] | 324.6 (seed 1) | 0 of 20 | 0.8 [0.0; 1.6] % |
 | K-MPC adaptive, reference without spikes | 0.1387 [0.1335; 0.1442] | 0.1624 (seed 7) | 36.4 [35.9; 38.2] | 324.6 (seed 1) | 0 of 20 | 0.0 [0.0; 0.0] % |
@@ -116,6 +128,8 @@ Filter in real time and inputs moved by spikes (deviation of Tc from the run wit
 | K-MPC adaptive, no supervisor | 0 [0; 1] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
 | K-MPC adaptive | 0 [0; 1] | 0 [0; 0] | 100.0 [100.0; 100.0] % | 16 [8; 44] | 0.357 [0.161; 0.516] |
 | K-MPC adaptive, anchored window | 0 [0; 1] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
+| K-MPC adaptive, sign gate | 0 [0; 1] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
+| K-MPC adaptive, anchored window, sign gate | 0 [0; 1] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
 | NMPC on the same KRR | 0 [0; 1] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
 | K-MPC adaptive, no filter | 0 [0; 0] | 0 [0; 0] | 0.0 [0.0; 0.0] % | 202 [166; 230] | 1.604 [1.356; 1.800] |
 | K-MPC adaptive, reference without spikes | 0 [0; 1] | 0 [0; 0] | - | - | - |
@@ -130,6 +144,8 @@ Filter in real time and inputs moved by spikes (deviation of Tc from the run wit
 | K-MPC adaptive, no supervisor | 1.5130 [1.5028; 1.5250] | 2.0403 (seed 15) | 12.3 [11.2; 14.3] | 330.4 (seed 2) | 0 of 20 | - |
 | K-MPC adaptive | 1.5130 [1.5028; 1.5250] | 2.0405 (seed 15) | 12.3 [11.2; 14.3] | 330.4 (seed 9) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, anchored window | 1.5345 [1.5062; 1.5635] | 1.8783 (seed 6) | 12.9 [11.6; 17.0] | 330.4 (seed 18) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, sign gate | 1.5135 [1.5039; 1.5309] | 2.0812 (seed 15) | 13.0 [10.8; 15.0] | 330.3 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, anchored window, sign gate | 1.5213 [1.5042; 1.5583] | 1.8052 (seed 7) | 12.4 [10.7; 19.1] | 330.5 (seed 7) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 1.5122 [1.5028; 1.5249] | 1.8136 (seed 2) | 11.9 [10.7; 13.7] | 330.4 (seed 9) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, symmetric penalty | 1.5130 [1.5028; 1.5250] | 2.0405 (seed 15) | 12.3 [11.2; 14.3] | 330.4 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
 
@@ -145,6 +161,8 @@ Asymmetric vs symmetric supervisor penalty: IAE equal on 0 of 20 seeds; the asym
 | K-MPC adaptive, no supervisor | 13.9976 [10.0737; 19.7517] | 25.1745 (seed 10) | 107.5 [81.1; 146.7] | 488.6 (seed 7) | 20 of 20 | - |
 | K-MPC adaptive | 11.1489 [9.1820; 20.2609] | 26.1027 (seed 14) | 122.6 [76.2; 157.7] | 488.4 (seed 13) | 20 of 20 | 16.9 [12.6; 21.8] % |
 | K-MPC adaptive, anchored window | 14.6635 [10.3801; 21.9551] | 24.2877 (seed 16) | 101.0 [75.2; 142.0] | 486.0 (seed 14) | 20 of 20 | 17.5 [14.1; 22.3] % |
+| K-MPC adaptive, sign gate | 10.5385 [8.4246; 14.3899] | 23.8813 (seed 3) | 128.3 [118.5; 163.4] | 486.9 (seed 14) | 20 of 20 | 20.5 [15.7; 28.3] % |
+| K-MPC adaptive, anchored window, sign gate | 12.6274 [8.5123; 18.6029] | 27.1375 (seed 11) | 131.2 [96.7; 160.1] | 488.4 (seed 10) | 20 of 20 | 24.1 [15.1; 31.1] % |
 | NMPC on the same KRR | 12.8399 [6.7413; 19.8661] | 25.9267 (seed 19) | 88.1 [68.2; 132.6] | 487.9 (seed 14) | 20 of 20 | 14.0 [11.3; 20.2] % |
 
 **S6: set-point outside the reachable range.** 20 seeds.
@@ -157,6 +175,8 @@ Asymmetric vs symmetric supervisor penalty: IAE equal on 0 of 20 seeds; the asym
 | K-MPC adaptive, no supervisor | 0.5572 [0.5507; 0.5686] | 0.6517 (seed 4) | 43.8 [37.6; 56.5] | 325.6 (seed 3) | 0 of 20 | - |
 | K-MPC adaptive | 0.5572 [0.5507; 0.5686] | 0.6517 (seed 4) | 43.8 [37.6; 56.5] | 325.6 (seed 3) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, anchored window | 0.5535 [0.5473; 0.5635] | 0.6425 (seed 4) | 44.3 [37.8; 58.3] | 325.6 (seed 3) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, sign gate | 0.5559 [0.5495; 0.5676] | 0.6517 (seed 4) | 42.7 [37.6; 47.7] | 325.6 (seed 3) | 0 of 20 | 0.0 [0.0; 0.0] % |
+| K-MPC adaptive, anchored window, sign gate | 0.5503 [0.5451; 0.5625] | 0.6425 (seed 4) | 39.6 [36.9; 49.7] | 325.6 (seed 14) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 0.5483 [0.5459; 0.5573] | 0.5753 (seed 4) | 36.9 [33.2; 38.7] | 325.6 (seed 13) | 0 of 20 | 0.0 [0.0; 0.0] % |
 
 Time at the input limits and settling after the set-point returns from below the range (Tc at its upper limit), min:
@@ -169,6 +189,8 @@ Time at the input limits and settling after the set-point returns from below the
 | K-MPC adaptive, no supervisor | 26.6 [26.5; 26.6] % | 22.9 [17.0; 26.5] % | 2.0 [2.0; 2.6] | 0 of 20 |
 | K-MPC adaptive | 26.6 [26.5; 26.6] % | 22.9 [17.0; 26.5] % | 2.0 [2.0; 2.6] | 0 of 20 |
 | K-MPC adaptive, anchored window | 26.6 [26.6; 26.6] % | 21.7 [15.9; 26.6] % | 2.0 [1.9; 2.5] | 0 of 20 |
+| K-MPC adaptive, sign gate | 26.6 [26.5; 26.6] % | 25.4 [19.7; 26.5] % | 2.0 [2.0; 2.6] | 0 of 20 |
+| K-MPC adaptive, anchored window, sign gate | 26.6 [26.6; 26.6] % | 25.6 [18.4; 26.6] % | 2.0 [1.9; 2.5] | 0 of 20 |
 | NMPC on the same KRR | 26.6 [26.6; 26.6] % | 22.7 [21.0; 26.6] % | 2.1 [2.0; 2.5] | 0 of 20 |
 
 "Supervisor not normal": share of steps with the supervisor in the cautious or conservative regime, configurations that use its multiplier.
@@ -214,6 +236,20 @@ Each pair separates one factor (TZ 7). "A lower": seeds on which A has the lower
 | K-MPC adaptive, anchored window vs K-MPC adaptive | anchored window (D10) | S5a | 6 of 20 | 0 | 1.006 | 11 of 20 | 0.958 |
 | K-MPC adaptive, anchored window vs K-MPC adaptive | anchored window (D10) | S5b | 8 of 20 | 0 | 1.108 | 14 of 20 | 0.873 |
 | K-MPC adaptive, anchored window vs K-MPC adaptive | anchored window (D10) | S6 | 14 of 20 | 0 | 0.996 | 10 of 20 | 0.994 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S1 | 2 of 20 | 11 | 1.000 | 4 of 20 | 1.000 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S2 | 9 of 20 | 8 | 1.000 | 7 of 20 | 1.000 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S3 | 7 of 20 | 5 | 1.000 | 6 of 20 | 1.000 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S4 | 1 of 20 | 15 | 1.000 | 2 of 20 | 1.000 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S5a | 5 of 20 | 7 | 1.000 | 6 of 20 | 1.000 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S5b | 12 of 20 | 0 | 0.839 | 8 of 20 | 1.154 |
+| K-MPC adaptive, sign gate vs K-MPC adaptive | sign gate (D13) | S6 | 6 of 20 | 10 | 1.000 | 6 of 20 | 1.000 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S1 | 4 of 20 | 12 | 1.000 | 2 of 20 | 1.000 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S2 | 0 of 20 | 20 | 1.000 | 0 of 20 | 1.000 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S3 | 2 of 20 | 13 | 1.000 | 1 of 20 | 1.000 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S4 | 1 of 20 | 16 | 1.000 | 1 of 20 | 1.000 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S5a | 7 of 20 | 7 | 1.000 | 6 of 20 | 1.000 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S5b | 11 of 20 | 0 | 0.921 | 8 of 20 | 1.129 |
+| K-MPC adaptive, anchored window, sign gate vs K-MPC adaptive, anchored window | sign gate on the anchored window | S6 | 7 of 20 | 9 | 1.000 | 8 of 20 | 1.000 |
 | K-MPC adaptive vs PID | industrial baseline | S1 | 1 of 20 | 0 | 1.043 | 20 of 20 | 0.391 |
 | K-MPC adaptive vs PID | industrial baseline | S2 | 0 of 20 | 0 | 1.407 | 20 of 20 | 0.143 |
 | K-MPC adaptive vs PID | industrial baseline | S3 | 0 of 20 | 0 | 1.219 | 20 of 20 | 0.171 |
@@ -235,6 +271,8 @@ Counted as decided in TZ 14, D11: each MPC configuration separately, all seeds o
 | K-MPC adaptive, no supervisor | 4 | 129760 | 0.003 % |
 | K-MPC adaptive | 5 | 129760 | 0.004 % |
 | K-MPC adaptive, anchored window | 2 | 129760 | 0.002 % |
+| K-MPC adaptive, sign gate | 9 | 129760 | 0.007 % |
+| K-MPC adaptive, anchored window, sign gate | 2 | 129760 | 0.002 % |
 | NMPC on the same KRR | 9 | 129760 | 0.007 % |
 | K-MPC adaptive, symmetric penalty | 0 | 14960 | 0.000 % |
 | K-MPC adaptive, no filter | 0 | 9960 | 0.000 % |
@@ -250,6 +288,8 @@ Every run with a fallback step (statuses other than 'solved'):
 | S1 | K-MPC adaptive, no supervisor | 8 | 1 | 648 | maximum iterations reached: 1 |
 | S1 | K-MPC adaptive | 5 | 1 | 648 | solved inaccurate: 1 |
 | S1 | K-MPC adaptive | 8 | 1 | 648 | maximum iterations reached: 1 |
+| S1 | K-MPC adaptive, sign gate | 5 | 1 | 648 | solved inaccurate: 1 |
+| S1 | K-MPC adaptive, sign gate | 8 | 4 | 648 | solved inaccurate: 2; maximum iterations reached: 2 |
 | S1 | NMPC on the same KRR | 14 | 1 | 648 | slsqp: Positive directional derivative for linesearch: 1 |
 | S2 | linear MPC (OE) | 3 | 1 | 998 | maximum iterations reached: 1 |
 | S2 | linear MPC (OE) | 10 | 1 | 998 | maximum iterations reached: 1 |
@@ -262,6 +302,10 @@ Every run with a fallback step (statuses other than 'solved'):
 | S5a | K-MPC adaptive | 16 | 1 | 748 | solved inaccurate: 1 |
 | S5a | K-MPC adaptive, anchored window | 5 | 1 | 748 | maximum iterations reached: 1 |
 | S5a | K-MPC adaptive, anchored window | 7 | 1 | 748 | maximum iterations reached: 1 |
+| S5a | K-MPC adaptive, sign gate | 7 | 3 | 748 | solved inaccurate: 1; maximum iterations reached: 2 |
+| S5a | K-MPC adaptive, sign gate | 16 | 1 | 748 | solved inaccurate: 1 |
+| S5a | K-MPC adaptive, anchored window, sign gate | 5 | 1 | 748 | maximum iterations reached: 1 |
+| S5a | K-MPC adaptive, anchored window, sign gate | 15 | 1 | 748 | maximum iterations reached: 1 |
 | S5a | NMPC on the same KRR | 1 | 1 | 748 | slsqp: Positive directional derivative for linesearch: 1 |
 | S5a | NMPC on the same KRR | 7 | 1 | 748 | slsqp: Positive directional derivative for linesearch: 1 |
 | S5a | NMPC on the same KRR | 9 | 1 | 748 | slsqp: Positive directional derivative for linesearch: 1 |
@@ -300,6 +344,43 @@ Every run with a fallback step (statuses other than 'solved'):
 | S5b | K-MPC adaptive, anchored window | 15 | 1 | 748 | solved inaccurate: 1 |
 | S5b | K-MPC adaptive, anchored window | 16 | 1 | 748 | solved inaccurate: 1 |
 | S5b | K-MPC adaptive, anchored window | 19 | 17 | 748 | maximum iterations reached: 13; solved inaccurate: 4 |
+| S5b | K-MPC adaptive, sign gate | 0 | 6 | 748 | solved inaccurate: 5; maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, sign gate | 1 | 21 | 748 | solved inaccurate: 5; maximum iterations reached: 16 |
+| S5b | K-MPC adaptive, sign gate | 2 | 12 | 748 | solved inaccurate: 8; maximum iterations reached: 4 |
+| S5b | K-MPC adaptive, sign gate | 3 | 10 | 748 | solved inaccurate: 10 |
+| S5b | K-MPC adaptive, sign gate | 4 | 3 | 748 | solved inaccurate: 1; maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, sign gate | 5 | 6 | 748 | solved inaccurate: 4; maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, sign gate | 6 | 4 | 748 | solved inaccurate: 4 |
+| S5b | K-MPC adaptive, sign gate | 7 | 5 | 748 | solved inaccurate: 3; maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, sign gate | 8 | 13 | 748 | solved inaccurate: 7; maximum iterations reached: 6 |
+| S5b | K-MPC adaptive, sign gate | 9 | 10 | 748 | solved inaccurate: 4; maximum iterations reached: 6 |
+| S5b | K-MPC adaptive, sign gate | 10 | 3 | 748 | solved inaccurate: 2; maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, sign gate | 11 | 1 | 748 | maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, sign gate | 12 | 13 | 748 | solved inaccurate: 2; maximum iterations reached: 11 |
+| S5b | K-MPC adaptive, sign gate | 13 | 10 | 748 | solved inaccurate: 3; maximum iterations reached: 7 |
+| S5b | K-MPC adaptive, sign gate | 14 | 10 | 748 | solved inaccurate: 7; maximum iterations reached: 3 |
+| S5b | K-MPC adaptive, sign gate | 15 | 3 | 748 | solved inaccurate: 1; maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, sign gate | 16 | 1 | 748 | solved inaccurate: 1 |
+| S5b | K-MPC adaptive, sign gate | 17 | 4 | 748 | solved inaccurate: 2; maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, sign gate | 18 | 7 | 748 | solved inaccurate: 6; maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 0 | 14 | 748 | solved inaccurate: 5; maximum iterations reached: 9 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 1 | 5 | 748 | solved inaccurate: 3; maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 2 | 10 | 748 | solved inaccurate: 10 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 3 | 10 | 748 | solved inaccurate: 3; maximum iterations reached: 7 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 5 | 9 | 748 | solved inaccurate: 6; maximum iterations reached: 3 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 6 | 3 | 748 | maximum iterations reached: 3 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 7 | 7 | 748 | solved inaccurate: 4; maximum iterations reached: 3 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 8 | 6 | 748 | solved inaccurate: 2; maximum iterations reached: 4 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 9 | 1 | 748 | maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 10 | 6 | 748 | solved inaccurate: 2; maximum iterations reached: 4 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 11 | 16 | 748 | solved inaccurate: 15; maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 12 | 8 | 748 | solved inaccurate: 1; maximum iterations reached: 7 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 13 | 2 | 748 | solved inaccurate: 1; maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 14 | 19 | 748 | solved inaccurate: 11; maximum iterations reached: 8 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 15 | 1 | 748 | maximum iterations reached: 1 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 16 | 4 | 748 | solved inaccurate: 1; maximum iterations reached: 3 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 18 | 2 | 748 | maximum iterations reached: 2 |
+| S5b | K-MPC adaptive, anchored window, sign gate | 19 | 4 | 748 | solved inaccurate: 2; maximum iterations reached: 2 |
 | S5b | NMPC on the same KRR | 0 | 16 | 748 | slsqp: Positive directional derivative for linesearch: 16 |
 | S5b | NMPC on the same KRR | 1 | 15 | 748 | slsqp: Positive directional derivative for linesearch: 15 |
 | S5b | NMPC on the same KRR | 2 | 29 | 748 | slsqp: Positive directional derivative for linesearch: 29 |
@@ -333,6 +414,8 @@ One BLAS thread per run, 2 runs in parallel on the machine named above. Over all
 | K-MPC adaptive, no supervisor | 140 | 3.3 | 4.9 | 8.7 | S1, seed 3 | 104.8 |
 | K-MPC adaptive | 140 | 3.3 | 4.8 | 7.3 | S1, seed 18 | 133.5 |
 | K-MPC adaptive, anchored window | 140 | 3.3 | 4.8 | 8.0 | S6, seed 8 | 151.1 |
+| K-MPC adaptive, sign gate | 140 | 5.0 | 7.3 | 10.7 | S5b, seed 1 | 137.4 |
+| K-MPC adaptive, anchored window, sign gate | 140 | 5.0 | 7.3 | 10.3 | S5b, seed 14 | 159.0 |
 | NMPC on the same KRR | 140 | 27.5 | 42.2 | 119.6 | S5b, seed 14 | 1174.1 |
 | K-MPC adaptive, symmetric penalty | 20 | 3.1 | 4.6 | 4.8 | S5a, seed 14 | 26.2 |
 | K-MPC adaptive, no filter | 20 | 3.2 | 4.6 | 5.1 | S4, seed 14 | 13.7 |
@@ -354,6 +437,8 @@ The oracle knows the true state and parameters (TZ 7); it runs on the reference 
 | S1 | K-MPC adaptive, no supervisor | 0.5215 | 68.2 | 325.5 |
 | S1 | K-MPC adaptive | 0.5215 | 68.2 | 325.5 |
 | S1 | K-MPC adaptive, anchored window | 0.5137 | 68.6 | 325.5 |
+| S1 | K-MPC adaptive, sign gate | 0.5218 | 68.2 | 325.5 |
+| S1 | K-MPC adaptive, anchored window, sign gate | 0.5137 | 68.6 | 325.5 |
 | S5a | NMPC on the same KRR | 1.5007 | 11.4 | 330.3 |
 | S5a | NMPC on the true model (oracle) | 1.4691 | 4.6 | 330.3 |
 | S5a | PID | 1.5145 | 33.0 | 330.3 |
@@ -362,6 +447,8 @@ The oracle knows the true state and parameters (TZ 7); it runs on the reference 
 | S5a | K-MPC adaptive, no supervisor | 1.5006 | 11.4 | 330.3 |
 | S5a | K-MPC adaptive | 1.5006 | 11.4 | 330.3 |
 | S5a | K-MPC adaptive, anchored window | 1.7253 | 38.8 | 330.1 |
+| S5a | K-MPC adaptive, sign gate | 1.5006 | 11.4 | 330.3 |
+| S5a | K-MPC adaptive, anchored window, sign gate | 1.7296 | 39.5 | 330.1 |
 | S5a | K-MPC adaptive, symmetric penalty | 1.5006 | 11.4 | 330.3 |
 
 ![S1](fig6_s1.png)
@@ -370,7 +457,19 @@ The oracle knows the true state and parameters (TZ 7); it runs on the reference 
 
 ![supervisor](fig6_supervisor.png)
 
-## 8. S3 diagnostic by the truth (seed 0)
+## 8. Steady-state offset on S0, 20 seeds (diagnostic by the truth; D13)
+
+S0 has the structure of S2 (Tf step, UA ramp, 15 min of constant disturbance after each) and is not a test scenario. Every 10 samples the steady-state gain dCa/dTc of the controller's model at the current point is compared with the true one. "Wrong sign": share of these probes where the two signs differ, over the whole run.
+
+| Configuration | seeds with offset <= 0.001 | worst, mol/L | wrong sign | refits rejected | IAE, mol/L min |
+|---|---|---|---|---|---|
+| K-MPC adaptive | 19 of 20 | 0.0026 | 0.3 [0.0; 1.5] % | - | 0.3224 [0.2945; 0.3890] |
+| K-MPC adaptive, anchored window | 20 of 20 | 0.0008 | 0.6 [0.0; 1.3] % | - | 0.3403 [0.2882; 0.4044] |
+| K-MPC static | 20 of 20 | 0.0006 | 0.0 [0.0; 0.6] % | - | 0.3138 [0.2724; 0.3733] |
+| K-MPC adaptive, sign gate | 20 of 20 | 0.0009 | 0.3 [0.0; 1.3] % | 0.0 [0.0; 1.3] % | 0.3225 [0.2946; 0.3891] |
+| K-MPC adaptive, anchored window, sign gate | 20 of 20 | 0.0008 | 0.6 [0.0; 1.3] % | 0.0 [0.0; 1.3] % | 0.3417 [0.2882; 0.4046] |
+
+## 9. S3 diagnostic by the truth (seed 0)
 
 Diagnostic by the truth (P3), seed 0, snapshots every 150 samples. Gain ratio: steady-state gain dCa/dTc of the controller's model over the true gain at the operating point; window std: standard deviation of Tc over the rows of the model's window.
 
@@ -381,7 +480,7 @@ Diagnostic by the truth (P3), seed 0, snapshots every 150 samples. Gain ratio: s
 
 This shows what the window model looked like, not why the loop performed as it did: causality is not established.
 
-## 9. Independent calculations (TZ 10)
+## 10. Independent calculations (TZ 10)
 
 Loss of the linearisation, S1, seed 0, 30 states of the adaptive K-MPC loop: the cost J of TZ 5.5 on the nonlinear free run of the same KRR, for the K-MPC plan, for the NMPC of the code (SLSQP with the analytic gradient) and for an independent solver (SciPy trust-constr, numerical gradient, 4 starts).
 
@@ -411,7 +510,7 @@ Ignition in S5, seed 0: the inputs of each run integrated again with LSODA (rtol
 | S5b | K-MPC adaptive, anchored window | 484.70 | 484.70 | 1.91e-01 | yes |
 | S5b | NMPC on the same KRR | 478.46 | 478.45 | 8.69e-03 | yes |
 
-## 10. Tuning and choices (P3)
+## 11. Tuning and choices (P3)
 
 Rule on S0 (seed 0, own random stream 10): admissible: no violations, |steady-state error| <= 0.001 mol/L on the S0 disturbance segments; among them the lowest TV of Tc with IAE within 5% of the lowest admissible IAE. Chosen: rho = 3, beta = 0.03, tau_c = 0.45 min (FOPDT on the start-up data: K = -0.0116 mol/L/K, tau = 1.269 min, theta = 0.45 min). Sensitivity to Np on S0 (Np stays 20):
 
@@ -429,9 +528,10 @@ Rule on S0 (seed 0, own random stream 10): admissible: no violations, |steady-st
 | Np, Nc, |dTc| limit | decisions R4, R5 | no |
 | Steady-state requirement in the tuning rule | added after S2 of seed 0 failed it at beta = 0.01 (D5); S2 itself takes no part in the selection | no (S2 seen) |
 | Anchored window, 500 of 1000 rows | a priori, added after the S3 result of seed 0 (D10) | no (S3 seen) |
+| Sign gate on the window model (D13) | S0, seeds 0-19, after the S2 result; no parameter | no (S2 seen) |
 | S3 diagnostic | true Ca, k0 and gains | diagnostic by the truth |
 
-## 11. Thresholds and their sources (P11)
+## 12. Thresholds and their sources (P11)
 
 | Threshold | Value | Source |
 |---|---|---|
@@ -451,7 +551,7 @@ Rule on S0 (seed 0, own random stream 10): admissible: no violations, |steady-st
 | S1 edge set-point | Ca at Tc_max - 0.25 K | closed_loop.S1_BELOW_LIMIT (scenario design) |
 | Anchored rows | 500 of 1000 | D10, a priori |
 
-## 12. Basis in the thesis (D12)
+## 13. Basis in the thesis (D12)
 
 Part 2 is a separate study on this reactor. It takes 4 ideas from the thesis (reference in README):
 
@@ -462,7 +562,7 @@ Part 2 is a separate study on this reactor. It takes 4 ideas from the thesis (re
 
 Everything else (model structure, disturbance filter, weights, horizons, supervisor penalty, limits, scenarios) is designed and tuned for this process; no code, data or numbers of the thesis are used. No stability analysis is carried over: only empirical results are claimed.
 
-## 13. Limitations
+## 14. Limitations
 
 - K-MPC adaptive: steady-state error in S2 above 0.001 mol/L on 8 of 20 seeds; the requirement of zero steady-state error (TZ 5.4, 9) is not met.
 - Simulation of a textbook reactor (model in the loop); no plant data, no hardware.

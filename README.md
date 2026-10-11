@@ -135,20 +135,21 @@ hard limits on Tc (box + rate) in every controller; fallback: shifted plan, clip
 
 **Results** (median over 20 seeds, true Ca; spread and worst seeds in the report)
 
-| Measure | PID | linear MPC (OE) | K-MPC static | K-MPC adaptive | K-MPC adaptive, anchored window | NMPC on the same KRR |
-|---|---|---|---|---|---|---|
-| S1, set-point steps: IAE, mol/L min | 0.5059 | 0.5837 | 0.5144 | 0.5246 | 0.5258 | 0.5240 |
-| S2, disturbances: IAE, mol/L min | 0.0546 | 0.1486 | 0.0677 | 0.0772 | 0.0664 | 0.0769 |
-| S3, k0 drift: IAE, mol/L min | 0.2860 | 0.6492 | 0.2694 | 0.3523 | 0.3093 | 0.3457 |
-| S1: total variation of Tc, K | 180.4 | 280.2 | 67.5 | 71.3 | 70.3 | 67.6 |
+| Measure | PID | linear MPC (OE) | K-MPC static | K-MPC adaptive | K-MPC adaptive, anchored window | K-MPC adaptive, sign gate | NMPC on the same KRR |
+|---|---|---|---|---|---|---|---|
+| S1, set-point steps: IAE, mol/L min | 0.5059 | 0.5837 | 0.5144 | 0.5246 | 0.5258 | 0.5243 | 0.5240 |
+| S2, disturbances: IAE, mol/L min | 0.0546 | 0.1486 | 0.0677 | 0.0772 | 0.0664 | 0.0742 | 0.0769 |
+| S3, k0 drift: IAE, mol/L min | 0.2860 | 0.6492 | 0.2694 | 0.3523 | 0.3093 | 0.3558 | 0.3457 |
+| S1: total variation of Tc, K | 180.4 | 280.2 | 67.5 | 71.3 | 70.3 | 71.3 | 67.6 |
 
-- Constraint violations: 0 in 1040 runs over 20 seeds.
+- Constraint violations: 0 in 1320 runs over 20 seeds.
 - Ignition inside the admissible set (S1, S2, S3, S4, S5a, S6), static and adaptive K-MPC: K-MPC static: 0 runs; K-MPC adaptive: 0 runs; highest T 330.4 K.
 - S2 steady-state error within 0.001 mol/L (the acceptance limit): static K-MPC on 20 of 20 seeds (worst 0.0008), adaptive K-MPC on 12 of 20 (worst 0.0053 mol/L): **the requirement is not met by the adaptive K-MPC.**
+- The same for the remedies chosen on the tuning scenario S0 (D10, D13): K-MPC adaptive, anchored window on 19 of 20 (worst 0.0011); K-MPC adaptive, sign gate on 17 of 20 (worst 0.0035); K-MPC adaptive, anchored window, sign gate on 19 of 20 (worst 0.0011). The sign gate keeps a refit of the window model only if its steady-state gain dCa/dTc is negative, as it is for this reactor throughout the admissible set; it was added after the S2 result and chosen on S0.
 - Step time, 95th percentile, one BLAS thread: K-MPC adaptive 4.8 ms (median over runs, highest 7.3), NMPC on the same KRR 42.2 ms.
 - S1: K-MPC adaptive has a lower IAE than NMPC on the same KRR on 3 of 20 seeds (median ratio 1.005); a smaller total variation of Tc than PID on 20 of 20 (median ratio 0.391).
 - S3 (drift): adaptive K-MPC has a lower IAE than static K-MPC on 0 of 20 seeds (median ratio 1.247). The configuration with an anchored window (500 of 1000 start-up rows kept) was added after the S3 result of seed 0; its row count was set without tuning.
-- Outside the admissible set (S5b: UA -10 %, Caf +5 %) the reactor ignites: PID 20 of 20, linear MPC (OE) 15 of 20, K-MPC static 20 of 20, K-MPC adaptive, no supervisor 20 of 20, K-MPC adaptive 20 of 20, K-MPC adaptive, anchored window 20 of 20, NMPC on the same KRR 20 of 20.
+- Outside the admissible set (S5b: UA -10 %, Caf +5 %) the reactor ignites: PID 20 of 20, linear MPC (OE) 15 of 20, K-MPC static 20 of 20, K-MPC adaptive, no supervisor 20 of 20, K-MPC adaptive 20 of 20, K-MPC adaptive, anchored window 20 of 20, K-MPC adaptive, sign gate 20 of 20, K-MPC adaptive, anchored window, sign gate 20 of 20, NMPC on the same KRR 20 of 20.
 
 **Limitations.** The adaptive K-MPC does not meet the zero steady-state error requirement in S2 on every seed (above). Simulation of a textbook process. Protection holds only inside the admissible set named above. No stability guarantee: the results are empirical, for these scenarios and seeds. T is not measured. Step times are for the machine in the report.
 

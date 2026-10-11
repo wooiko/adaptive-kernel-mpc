@@ -110,6 +110,27 @@ def disturbance(model, y_k, x_km1):
     return float(y_k - model.f(np.asarray(x_km1, float)))
 
 
+def ss_gain(g):
+    """Steady-state gain dy/du of the local model y = a1 y + a2 y + b1 u + b2 u at a point with gradient
+    g = [a1, a2, b1, b2]; None if 1 - a1 - a2 <= 0 (no stable steady state of the local model)."""
+    a1, a2, b1, b2 = g
+    den = 1.0 - a1 - a2
+    return float((b1 + b2) / den) if den > 0 else None
+
+
+def sign_gate(ident, krr):
+    """refit_check for adaptive.AdaptiveIdentifier: keep a refit of the window model only if its steady-state gain
+    dCa/dTc at the operating point of the newest window row is negative. On the cold branch of this reactor a
+    higher coolant temperature always lowers Ca (tests/test_mpc.py, GainSign); a refit that loses this sign is
+    rejected and the previous model stays."""
+    z = np.asarray(ident.Z[-1], float)
+    x = ident.sc.mx + z * ident.sc.sx                     # physical regressor [y_k, y_k-1, u_k, u_k-1]
+    x_ss = np.array([x[0], x[0], x[2], x[2]])
+    g = krr.gradient(ident.sc.x(x_ss)) * ident.sc.st / ident.sc.sx
+    k = ss_gain(g)
+    return k is not None and k < 0.0
+
+
 def shift_plan(V, u_km1, Nc=NC):
     """Nominal plan for this step: the previous plan V (u_{k-1} .. u_{k+Nc-2}) shifted by one step,
     its last value repeated; on the first step (V is None) u_{k-1} for every move."""

@@ -59,6 +59,8 @@ PAIRS = [  # (A, B, the factor the pair separates; TZ 7)
     ("K-MPC adaptive", "NMPC on the same KRR", "linearisation (same model, QP vs SLSQP)"),
     ("K-MPC adaptive", "K-MPC adaptive, no supervisor", "supervisor"),
     ("K-MPC adaptive, anchored window", "K-MPC adaptive", "anchored window (D10)"),
+    ("K-MPC adaptive, sign gate", "K-MPC adaptive", "sign gate (D13)"),
+    ("K-MPC adaptive, anchored window, sign gate", "K-MPC adaptive, anchored window", "sign gate on the anchored window"),
     ("K-MPC adaptive", "PID", "industrial baseline"),
 ]
 THESIS_BASIS = [  # what part 2 takes from the thesis (TZ 14, D12); everything else is designed for this process
@@ -78,6 +80,12 @@ def load():
     diag = json.loads((OUT / "mpc_diag_s3.json").read_text())
     ind_f = OUT / "mpc_independent.json"
     ind = json.loads(ind_f.read_text()) if ind_f.exists() else None
+    off = [json.loads((OUT / f).read_text()) for f in ("mpc_diag_offset.json", "mpc_diag_offset_gate.json")
+           if (OUT / f).exists()]
+    if ind is not None:
+        ind["offset_s0"] = off
+    elif off:
+        ind = {"offset_s0": off}
     return S, R0, T, diag, ind
 
 
@@ -351,6 +359,10 @@ def write_report(S, R0, T, diag, ind):
     L.append(md_table(["Scenario", "Configuration", "IAE, mol/L min", "TV of Tc, K", "highest T, K"], rows) + "\n")
     L.append("![S1](fig6_s1.png)\n\n![disturbance](fig6_disturbance.png)\n\n![supervisor](fig6_supervisor.png)\n")
 
+    if ind and ind.get("offset_s0"):
+        sec.h("Steady-state offset on S0, 20 seeds (diagnostic by the truth; D13)")
+        L.extend(offset_text(ind["offset_s0"]))
+
     sec.h("S3 diagnostic by the truth (seed 0)")
     L.extend(s3_diag_text(diag))
 
@@ -374,6 +386,7 @@ def write_report(S, R0, T, diag, ind):
         ["Steady-state requirement in the tuning rule", "added after S2 of seed 0 failed it at beta = 0.01 (D5); "
                                                        "S2 itself takes no part in the selection", "no (S2 seen)"],
         ["Anchored window, 500 of 1000 rows", "a priori, added after the S3 result of seed 0 (D10)", "no (S3 seen)"],
+        ["Sign gate on the window model (D13)", "S0, seeds 0-19, after the S2 result; no parameter", "no (S2 seen)"],
         ["S3 diagnostic", "true Ca, k0 and gains", "diagnostic by the truth"],
     ]) + "\n")
 
@@ -415,7 +428,7 @@ def scenario_notes(S, scen):
         out.append(md_table(["Configuration", "spread", "worst seed", f"seeds <= {SS_LIMIT}"], rows) + "\n")
         ev = ("Tf +1 K", "Tf -1 K", "Tf back", "UA ramp", "after the UA ramp")
         rows = []
-        for c in KMPC_CRIT + ("K-MPC adaptive, anchored window", "NMPC on the same KRR"):
+        for c in KMPC_CRIT + GATE_GROUP + ("NMPC on the same KRR",):
             cnt = np.zeros(len(ev), int)
             for _, m in runs(S, scen, c):
                 for i in cl.scenario_s2(0, S["tc_max"]["tc_max"])["hold_segments"]:
@@ -458,6 +471,28 @@ def scenario_notes(S, scen):
                    "(Tc at its upper limit), min:\n")
         out.append(md_table(["Configuration", "at Tc_max", "at Tc_min", "settling after return", "not settled"], rows)
                    + "\n")
+    return out
+
+
+def offset_text(diags):
+    """Section on the S0 offset diagnostic (diagnose_offset.py)."""
+    runs = [r for d in diags for r in d["runs"]]
+    pe = diags[0]["probe_every"]
+    out = [f"S0 has the structure of S2 (Tf step, UA ramp, 15 min of constant disturbance after each) and is not a test "
+           f"scenario. Every {pe} samples the steady-state gain dCa/dTc of the controller's model at the current point "
+           "is compared with the true one. \"Wrong sign\": share of these probes where the two signs differ, over the "
+           "whole run.\n"]
+    rows = []
+    for c in dict.fromkeys(r["config"] for r in runs):
+        rr = [r for r in runs if r["config"] == c]
+        ssv = np.array([max(abs(e) for e in r["ss_error_hold"]) for r in rr])
+        rej = [100 * r["refits_rejected"] / r["refits"] for r in rr if r.get("refits")]
+        rows.append([c, f"{int(np.sum(ssv <= SS_LIMIT))} of {len(rr)}", f"{ssv.max():.4f}",
+                     spread(100 * np.array([r["wrong_sign_share_all"] for r in rr]), 1) + " %",
+                     spread(rej, 1) + " %" if rej else "-",
+                     spread([r["iae_total"] for r in rr]) if all("iae_total" in r for r in rr) else "-"])
+    out.append(md_table(["Configuration", f"seeds with offset <= {SS_LIMIT}", "worst, mol/L", "wrong sign",
+                         "refits rejected", "IAE, mol/L min"], rows) + "\n")
     return out
 
 
@@ -581,7 +616,9 @@ README_ROWS = [  # (label, scenario, configurations, metric key, decimals)
     ("S3, k0 drift: IAE, mol/L min", "S3", IAE, 4),
     ("S1: total variation of Tc, K", "S1", TV, 1),
 ]
+GATE_GROUP = ("K-MPC adaptive, anchored window", "K-MPC adaptive, sign gate", "K-MPC adaptive, anchored window, sign gate")
 README_CONFS = ("PID", "linear MPC (OE)", "K-MPC static", "K-MPC adaptive", "K-MPC adaptive, anchored window",
+                "K-MPC adaptive, sign gate",
                 "NMPC on the same KRR")
 
 
@@ -592,7 +629,9 @@ def readme_section(S, R0):
     med = lambda scen, c, key: float(np.median(values(S, scen, c, key)[1]))   # noqa: E731
     rows = [[lab] + [f"{med(scen, c, key):.{nd}f}" for c in README_CONFS] for lab, scen, key, nd in README_ROWS]
     ss = {c: np.max(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1]) for c in KMPC_CRIT}
-    nss = {c: int(np.sum(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1] <= SS_LIMIT)) for c in KMPC_CRIT}
+    nss = {c: int(np.sum(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1] <= SS_LIMIT))
+           for c in KMPC_CRIT + GATE_GROUP}
+    ss.update({c: np.max(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1]) for c in GATE_GROUP})
     stt = {r["conf"]: r for r in step_table(S)}
     ign_b = {c: sum(int(m["ignition"]) for _, m in runs(S, "S5b", c)) for c in configs(S, "S5b")}
     pa = pair_stats(S, "K-MPC adaptive", "K-MPC static", "S3")
@@ -622,6 +661,10 @@ def readme_section(S, R0):
          f"of {n} seeds (worst {ss['K-MPC static']:.4f}), adaptive K-MPC on {nss['K-MPC adaptive']} of {n} (worst "
          f"{ss['K-MPC adaptive']:.4f} mol/L)" + ("." if crit["s2"]["pass"] else
                                                  ": **the requirement is not met by the adaptive K-MPC.**"),
+         "- The same for the remedies chosen on the tuning scenario S0 (D10, D13): "
+         + "; ".join(f"{c} on {nss[c]} of {n} (worst {ss[c]:.4f})" for c in GATE_GROUP) + ". The sign gate keeps a "
+         "refit of the window model only if its steady-state gain dCa/dTc is negative, as it is for this reactor "
+         "throughout the admissible set; it was added after the S2 result and chosen on S0.",
          f"- Step time, 95th percentile, one BLAS thread: K-MPC adaptive {stt['K-MPC adaptive']['p95_med']:.1f} ms "
          f"(median over runs, highest {stt['K-MPC adaptive']['p95_max']:.1f}), NMPC on the same KRR "
          f"{stt['NMPC on the same KRR']['p95_med']:.1f} ms.",

@@ -854,6 +854,52 @@ class ReadmeNumbers(unittest.TestCase):
             self.assertEqual(cell, f"{np.median(v):.4f}", conf)
 
 
+class GainSign(unittest.TestCase):
+    """The physical fact behind mpc.sign_gate: on the cold branch dCa/dTc < 0 at every vertex of the admissible set,
+    also with k0 x S3_K0_END (S3), for Tc from TC_MIN to Tc_max."""
+    def test_cold_branch_gain_negative(self):
+        lim = safety.tc_max()["tc_max"]
+        pts = safety.vertices(safety.admissible_set())
+        for v in pts:
+            for k0 in (1.0, cl.S3_K0_END):
+                p = safety.params_at(v)
+                p = cl._with(p, k0=k0)
+                tc = np.linspace(safety.TC_MIN, lim, 12)
+                ca = np.array([safety.cold_steady_state(t, p)[0] for t in tc])
+                self.assertTrue(np.all(np.diff(ca) < 0), (v, k0))
+
+
+class _GradStub:
+    """KRR stand-in whose gradient, converted to physical units by sign_gate, equals g_phys."""
+    def __init__(self, g_phys, sc): self.g = np.asarray(g_phys) * sc.sx / sc.st
+    def gradient(self, z): return self.g
+
+
+class SignGate(unittest.TestCase):
+    """Mutations: sign of the gate test; a rejected refit applied anyway."""
+    def test_gate_decision(self):
+        ident = new_identifier()
+        self.assertTrue(mpc.sign_gate(ident, _GradStub([0.6, 0.2, -0.01, -0.005], SC)))
+        self.assertFalse(mpc.sign_gate(ident, _GradStub([0.6, 0.2, 0.01, 0.005], SC)))
+        self.assertFalse(mpc.sign_gate(ident, _GradStub([0.9, 0.3, -0.01, -0.005], SC)))   # 1 - a1 - a2 < 0
+        self.assertTrue(mpc.sign_gate(ident, ident.krr))          # the reactor model of this module: dCa/dTc < 0
+
+    def test_rejected_refit_keeps_the_model(self):
+        ident = AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=400,
+                                   refit_check=lambda idt, cand: False)
+        before = ident.krr
+        alpha = before.alpha.copy()
+        ident.learn(X0[:30], T0[:30] + 0.01, np.zeros(30, int))
+        self.assertIs(ident.krr, before)
+        np.testing.assert_array_equal(ident.krr.alpha, alpha)
+        self.assertEqual((ident.n_refit, ident.n_refit_rejected), (1, 1))
+        ok = AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=400,
+                                refit_check=lambda idt, cand: True)
+        ok.learn(X0[:30], T0[:30] + 0.01, np.zeros(30, int))
+        self.assertFalse(np.array_equal(ok.krr.alpha, alpha))
+        self.assertEqual(ok.n_refit_rejected, 0)
+
+
 class Scenarios(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

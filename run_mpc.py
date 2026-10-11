@@ -54,6 +54,8 @@ CONFIGS = {
     "K-MPC adaptive, no supervisor": ("kmpc", True, False),
     "K-MPC adaptive": ("kmpc", True, True),
     "K-MPC adaptive, anchored window": ("kmpc_anchored", True, True),
+    "K-MPC adaptive, sign gate": ("kmpc_gate", True, True),           # D13: refit kept only if dCa/dTc < 0
+    "K-MPC adaptive, anchored window, sign gate": ("kmpc_anchored_gate", True, True),
     "NMPC on the same KRR": ("nmpc", True, True),
     "K-MPC adaptive, symmetric penalty": ("kmpc_sym", True, True),
     "K-MPC adaptive, no filter": ("kmpc_nofilter", True, True),
@@ -61,7 +63,8 @@ CONFIGS = {
     "NMPC on the true model (oracle)": ("true", True, False),
 }
 STANDARD = ("PID", "linear MPC (OE)", "K-MPC static", "K-MPC adaptive, no supervisor", "K-MPC adaptive",
-            "K-MPC adaptive, anchored window", "NMPC on the same KRR")
+            "K-MPC adaptive, anchored window", "K-MPC adaptive, sign gate", "K-MPC adaptive, anchored window, sign gate",
+            "NMPC on the same KRR")
 PLAN = {"S1": STANDARD, "S2": STANDARD, "S3": STANDARD, "S6": STANDARD, "S5b": STANDARD,
         "S4": STANDARD + ("K-MPC adaptive, no filter", "K-MPC adaptive, reference without spikes"),
         "S5a": STANDARD + ("K-MPC adaptive, symmetric penalty",)}
@@ -85,7 +88,8 @@ def make(name, c, lim, s, Np=mpc.NP):
     """Controller and identifier of one configuration. s: frozen settings (rho, beta, PID)."""
     kind, adapt, _ = CONFIGS[name]
     ident = pl.identifier(c, horizon=Np, adapt=adapt, use_filter=(kind != "kmpc_nofilter"),
-                          anchor=(ANCHOR if kind == "kmpc_anchored" else 0))
+                          anchor=(ANCHOR if kind.startswith("kmpc_anchored") else 0),
+                          refit_check=(mpc.sign_gate if kind.endswith("_gate") else None))
     if kind == "pid":
         ctrl = ctl.PID(s["pid"]["Kc"], s["pid"]["tau_i"], lim)
     elif kind == "lmpc":
