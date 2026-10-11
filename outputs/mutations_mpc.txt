@@ -29,6 +29,9 @@ caught    anchor_refit_dropped  adaptive.py   anchored window: fixed rows droppe
 caught    anchor_newest         adaptive.py   anchored window: fixed rows taken from the newest instead of the oldest
 caught    gate_sign             mpc.py        sign gate: sign of the gain test
 caught    gate_ignored          adaptive.py   sign gate: a rejected refit applied anyway
+caught    learn_window_short    closed_loop.py  excitation window: one sample short
+caught    learning_ignored      adaptive.py   excitation window: learning flag ignored
+caught    r2_last_rows          run_mpc.py    initial window from the last rows of the record
 caught    readme_number_edit    README.md     README: a number of the Part 2 table edited by hand
 caught    tune_ss_ignored       run_mpc.py    tuning: steady-state limit ignored in the selection
-32 of 32 caught
+35 of 35 caught

@@ -68,7 +68,7 @@ CONFIGS = {
 }
 STANDARD = ("PID", "linear MPC (OE)", "K-MPC static", "K-MPC adaptive, no supervisor", "K-MPC adaptive",
             "K-MPC adaptive, anchored window", "K-MPC adaptive, sign gate", "K-MPC adaptive, anchored window, sign gate",
-            "NMPC on the same KRR")
+            "K-MPC adaptive, excitation window", "NMPC on the same KRR")
 PLAN = {"S1": STANDARD, "S2": STANDARD, "S3": STANDARD, "S6": STANDARD, "S5b": STANDARD,
         "S4": STANDARD + ("K-MPC adaptive, no filter", "K-MPC adaptive, reference without spikes"),
         "S5a": STANDARD + ("K-MPC adaptive, symmetric penalty",)}

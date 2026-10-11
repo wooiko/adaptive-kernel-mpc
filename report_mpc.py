@@ -61,6 +61,8 @@ PAIRS = [  # (A, B, the factor the pair separates; TZ 7)
     ("K-MPC adaptive, anchored window", "K-MPC adaptive", "anchored window (D10)"),
     ("K-MPC adaptive, sign gate", "K-MPC adaptive", "sign gate (D13)"),
     ("K-MPC adaptive, anchored window, sign gate", "K-MPC adaptive, anchored window", "sign gate on the anchored window"),
+    ("K-MPC adaptive, excitation window", "K-MPC adaptive", "excitation window (D14)"),
+    ("K-MPC adaptive, excitation window", "K-MPC static", "excitation window against a frozen model"),
     ("K-MPC adaptive", "PID", "industrial baseline"),
 ]
 THESIS_BASIS = [  # what part 2 takes from the thesis (TZ 14, D12); everything else is designed for this process
@@ -359,6 +361,11 @@ def write_report(S, R0, T, diag, ind):
     L.append(md_table(["Scenario", "Configuration", "IAE, mol/L min", "TV of Tc, K", "highest T, K"], rows) + "\n")
     L.append("![S1](fig6_s1.png)\n\n![disturbance](fig6_disturbance.png)\n\n![supervisor](fig6_supervisor.png)\n")
 
+    val = load_validation()
+    if val:
+        sec.h("Validation of the excitation window on new seeds (D14)")
+        L.extend(validation_text(val))
+
     if ind and ind.get("offset_s0"):
         sec.h("Steady-state offset on S0, 20 seeds (diagnostic by the truth; D13)")
         L.extend(offset_text(ind["offset_s0"]))
@@ -471,6 +478,92 @@ def scenario_notes(S, scen):
                    "(Tc at its upper limit), min:\n")
         out.append(md_table(["Configuration", "at Tc_max", "at Tc_min", "settling after return", "not settled"], rows)
                    + "\n")
+    return out
+
+
+def load_validation():
+    f = OUT / "mpc_validation.json"
+    if not f.exists():
+        return None
+    v = json.loads(f.read_text())
+    rf = OUT / "mpc_validation_repeat.json"
+    v["repeat_result"] = json.loads(rf.read_text()) if rf.exists() else None
+    return v
+
+
+def failed_detail(v):
+    """Which criteria failed and, for b, the seed behind each failed segment (values of both configurations)."""
+    import validate_offset as vo
+    cr = v["criteria"]
+    parts = []
+    for k in "abcd":
+        if cr[k]["pass"]:
+            continue
+        if k == "b":
+            for b in cr["b"]["segments"]:
+                if b["pass"]:
+                    continue
+                F, S = vo.get(v["rows"], b["scenario"], vo.FIXED), vo.get(v["rows"], b["scenario"], "K-MPC static")
+                i = b["segment"]
+                f, st = max(zip(F, S), key=lambda t: abs(t[0]["ss_error_1e3"][i] - t[1]["ss_error_1e3"][i]))
+                parts.append(f"b ({b['scenario']}, segment {i}: mean difference {b['mean_diff_1e3']:+.3f}; seed "
+                             f"{f['seed']}: {vo.FIXED} {f['ss_error_1e3'][i]:+.2f}, K-MPC static {st['ss_error_1e3'][i]:+.2f})")
+        else:
+            parts.append(k)
+    return parts
+
+
+def validation_text(v):
+    """Section on validate_offset.py: criteria fixed before the run, seeds never used before."""
+    import validate_offset as vo
+    rows, cr = v["rows"], v["criteria"]
+    out = [f"The configuration \"{vo.FIXED}\" (rows enter the window only for {rm.N_EXC} samples after a set-point "
+           f"change; initial window evenly over the whole start-up record) was validated once on seeds "
+           f"{min(v['seeds'])}-{max(v['seeds'])}, which no earlier run used. The criteria and the decision rule were "
+           "committed before the run (validate_offset.py, commit 3b3692f; commit 795179d fixed only the JSON output after a "
+           "first run that failed before writing or showing any result). Steady-state errors in 1e-3 mol/L.\n"]
+    tab = []
+    for st, scens in vo.SETS.items():
+        if st == "V5":
+            continue
+        for scen in scens:
+            for name in vo.CONFIGS:
+                rr = vo.get(rows, scen, name)
+                w = [max(abs(e) for e in r["ss_error_1e3"]) for r in rr]
+                tab.append([st, scen, name, f"{sum(x <= vo.A_LIMIT for x in w)} of {len(w)}", f"{max(w):.2f}"])
+    out.append(md_table(["Set", "Scenario", "Configuration", f"seeds with all segments <= {vo.A_LIMIT}", "worst"], tab)
+               + "\n")
+    bseg = cr["b"]["segments"]
+    worst_b = max(bseg, key=lambda b: abs(b["mean_diff_1e3"]))
+    worst_s = max(bseg, key=lambda b: b["max_abs_diff_1e3"])
+    d = cr["d"]["scenarios"]
+    crit = [
+        ["a", f"|error| <= {vo.A_LIMIT} on every segment of V1-V4", f"{len(cr['a']['violations'])} values above",
+         "yes" if cr["a"]["pass"] else "**no**"],
+        ["b", f"|mean(F - static)| <= {vo.B_MEAN}, each |F - static| <= {vo.B_SINGLE}",
+         f"largest |mean| {abs(worst_b['mean_diff_1e3']):.3f} ({worst_b['scenario']}, segment {worst_b['segment']}); "
+         f"largest single {worst_s['max_abs_diff_1e3']:.3f}", "yes" if cr["b"]["pass"] else "**no**"],
+        ["c", f"gamma >= {vo.C_GAMMA} at every probe of F in V1-V4", f"lowest {cr['c']['gamma_min']:.3f}",
+         "yes" if cr["c"]["pass"] else "**no**"],
+        ["d", f"V5: median IAE(F)/IAE(adaptive) <= {vo.D_IAE_RATIO}, no violations, fallback <= "
+              f"{100 * vo.D_FALLBACK:.1f} %",
+         "; ".join(f"{k} {x['iae_ratio_median']:.3f}" for k, x in d.items()), "yes" if cr["d"]["pass"] else "**no**"],
+    ]
+    out.append(md_table(["Criterion", "Requirement", "Result", "Met"], crit) + "\n")
+    if cr["a"]["violations"]:
+        out.append(md_table(["Set", "Scenario", "seed", "segment", "error"],
+                            [[x["set"], x["scenario"], x["seed"], x["segment"], f"{x['error_1e3']:.2f}"]
+                             for x in cr["a"]["violations"]]) + "\n")
+    rr = v.get("repeat_result")
+    rep_txt = ""
+    if rr:
+        rep_txt = (f" Repetition of {rr['set']} on seeds {min(rr['seeds'])}-{max(rr['seeds'])}: "
+                   + ("criteria a-c met." if rr["passed"] else "criteria a-c not met."))
+    fd = failed_detail(v)
+    if fd:
+        out.append("Criteria not met: " + "; ".join(fd) + ".\n")
+    out.append(f"Decision by the rule fixed before the run: **{v['decision']}**"
+               + (f" (repeat of {v['repeat']} required)" if v.get("repeat") else "") + "." + rep_txt + "\n")
     return out
 
 
@@ -616,9 +709,10 @@ README_ROWS = [  # (label, scenario, configurations, metric key, decimals)
     ("S3, k0 drift: IAE, mol/L min", "S3", IAE, 4),
     ("S1: total variation of Tc, K", "S1", TV, 1),
 ]
-GATE_GROUP = ("K-MPC adaptive, anchored window", "K-MPC adaptive, sign gate", "K-MPC adaptive, anchored window, sign gate")
+GATE_GROUP = ("K-MPC adaptive, anchored window", "K-MPC adaptive, sign gate", "K-MPC adaptive, anchored window, sign gate",
+              "K-MPC adaptive, excitation window")
 README_CONFS = ("PID", "linear MPC (OE)", "K-MPC static", "K-MPC adaptive", "K-MPC adaptive, anchored window",
-                "K-MPC adaptive, sign gate",
+                "K-MPC adaptive, sign gate", "K-MPC adaptive, excitation window",
                 "NMPC on the same KRR")
 
 
@@ -661,10 +755,11 @@ def readme_section(S, R0):
          f"of {n} seeds (worst {ss['K-MPC static']:.4f}), adaptive K-MPC on {nss['K-MPC adaptive']} of {n} (worst "
          f"{ss['K-MPC adaptive']:.4f} mol/L)" + ("." if crit["s2"]["pass"] else
                                                  ": **the requirement is not met by the adaptive K-MPC.**"),
-         "- The same for the remedies chosen on the tuning scenario S0 (D10, D13): "
+         "- The same for the remedies (D10, D13 chosen on the tuning scenario S0; D14 from the independent analysis): "
          + "; ".join(f"{c} on {nss[c]} of {n} (worst {ss[c]:.4f})" for c in GATE_GROUP) + ". The sign gate keeps a "
          "refit of the window model only if its steady-state gain dCa/dTc is negative, as it is for this reactor "
          "throughout the admissible set; it was added after the S2 result and chosen on S0.",
+         *validation_readme_lines(),
          f"- Step time, 95th percentile, one BLAS thread: K-MPC adaptive {stt['K-MPC adaptive']['p95_med']:.1f} ms "
          f"(median over runs, highest {stt['K-MPC adaptive']['p95_max']:.1f}), NMPC on the same KRR "
          f"{stt['NMPC on the same KRR']['p95_med']:.1f} ms.",
@@ -692,6 +787,24 @@ def readme_section(S, R0):
          "![seeds](outputs/fig6_seeds.png)", "",
          README_END]
     return "\n".join(L)
+
+
+def validation_readme_lines():
+    v = load_validation()
+    if not v:
+        return []
+    import validate_offset as vo
+    w = {st: [max(abs(e) for e in r["ss_error_1e3"]) for scen in vo.SETS[st] for r in vo.get(v["rows"], scen, vo.FIXED)]
+         for st in vo.SETS if st != "V5"}
+    rr = v.get("repeat_result")
+    return [f"- Remedy D14 (\"{vo.FIXED}\": rows enter the window only for {rm.N_EXC} samples after a set-point "
+            "change), validated once on seeds "
+            f"{min(v['seeds'])}-{max(v['seeds'])} with criteria fixed before the run: "
+            + "; ".join(f"{st} worst {max(x):.2f}e-3 mol/L" for st, x in w.items())
+            + f"; decision **{v['decision']}**"
+            + (" (criteria not met: " + "; ".join(failed_detail(v)) + ")" if failed_detail(v) else "")
+            + (f", repeat of {rr['set']} on seeds {min(rr['seeds'])}-{max(rr['seeds'])} "
+               + ("passed" if rr["passed"] else "not passed") if rr else "") + " (report, section on D14)."]
 
 
 def check_readme_numbers(readme_text, S, R0):
