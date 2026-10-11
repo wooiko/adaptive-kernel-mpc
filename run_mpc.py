@@ -43,6 +43,9 @@ TUNE_TOL = 0.05                           # selection on S0: settings within 5 %
 SS_LIMIT = 0.001                          # mol/L: candidates must also meet the steady-state requirement of TZ 9
                                           # (S2 threshold) on the disturbance segments of S0, not of S2 (P3)
 
+ANCHOR = 500                              # anchored window (TZ 14, D10): the oldest 500 of the 1000 rows of the
+                                          # initial window stay in it; set a priori, not tuned (P3)
+
 # name: (controller kind, identifier adapts (else frozen at commissioning), supervisor multiplier used)
 CONFIGS = {
     "PID": ("pid", False, False),
@@ -50,6 +53,7 @@ CONFIGS = {
     "K-MPC static": ("kmpc_static", False, False),
     "K-MPC adaptive, no supervisor": ("kmpc", True, False),
     "K-MPC adaptive": ("kmpc", True, True),
+    "K-MPC adaptive, anchored window": ("kmpc_anchored", True, True),
     "NMPC on the same KRR": ("nmpc", True, True),
     "K-MPC adaptive, symmetric penalty": ("kmpc_sym", True, True),
     "K-MPC adaptive, no filter": ("kmpc_nofilter", True, True),
@@ -57,11 +61,12 @@ CONFIGS = {
     "NMPC on the true model (oracle)": ("true", True, False),
 }
 STANDARD = ("PID", "linear MPC (OE)", "K-MPC static", "K-MPC adaptive, no supervisor", "K-MPC adaptive",
-            "NMPC on the same KRR")
+            "K-MPC adaptive, anchored window", "NMPC on the same KRR")
 PLAN = {"S1": STANDARD, "S2": STANDARD, "S3": STANDARD, "S6": STANDARD, "S5b": STANDARD,
         "S4": STANDARD + ("K-MPC adaptive, no filter", "K-MPC adaptive, reference without spikes"),
         "S5a": STANDARD + ("K-MPC adaptive, symmetric penalty",)}
 ORACLE_SCENARIOS = ("S1", "S5a")           # oracle NMPC: reference seed only (TZ 7)
+KEEP_LOGS = ("S1", "S2", "S4", "S5a", "S5b")   # logs kept for the figures and the S4 comparison
 
 
 def commissioning(seed):
@@ -79,7 +84,8 @@ def commissioning(seed):
 def make(name, c, lim, s, Np=mpc.NP):
     """Controller and identifier of one configuration. s: frozen settings (rho, beta, PID)."""
     kind, adapt, _ = CONFIGS[name]
-    ident = pl.identifier(c, horizon=Np, adapt=adapt, use_filter=(kind != "kmpc_nofilter"))
+    ident = pl.identifier(c, horizon=Np, adapt=adapt, use_filter=(kind != "kmpc_nofilter"),
+                          anchor=(ANCHOR if kind == "kmpc_anchored" else 0))
     if kind == "pid":
         ctrl = ctl.PID(s["pid"]["Kc"], s["pid"]["tau_i"], lim)
     elif kind == "lmpc":
@@ -229,6 +235,83 @@ def step_time_figure(logs, path):
     plt.close(fig)
 
 
+def machine():
+    return {"platform": platform.platform(), "processor": platform.processor() or platform.machine(),
+            "python": platform.python_version(), "blas_threads": 1, "workers": WORKERS}
+
+
+def settings_block(lim, s):
+    """Frozen settings of a run, as written into the result JSON (lim: safety.tc_max())."""
+    return {"Np": mpc.NP, "Nc": mpc.NC, "du_max": mpc.DU_MAX, "tc_min": safety.TC_MIN,
+            "tc_max": lim["tc_max"], "sigma_y": mpc.SIGMA_Y, "sigma_u": mpc.SIGMA_U, **s,
+            "tuning": f"outputs/mpc_tuning.json (S0, seed {REFERENCE_SEED})",
+            "osqp": mpc.OSQP_SETTINGS, "feas_tol": mpc.FEAS_TOL, "ignition_T": cl.IGNITION_T,
+            "band": cl.BAND, "anchor_rows": ANCHOR,
+            "configs": {k: dict(zip(("kind", "adapt", "supervisor"), v)) for k, v in CONFIGS.items()}}
+
+
+FIG_S2 = ("PID", "linear MPC (OE)", "K-MPC static", "K-MPC adaptive")
+
+
+def s2_figure(logs, path):
+    """S2, reference seed: true Ca and Tc under the disturbances (Tf +-1 K, UA ramp to -5 %)."""
+    import matplotlib.pyplot as plt
+    import figures as fg
+    cols = dict(zip(FIG_S2, (fg.AQUA, fg.ORANGE, fg.VIOLET, fg.BLUE)))
+    ref = logs[("S2", FIG_S2[-1])]
+    t = np.arange(len(ref["r"])) * data.TS
+    fig, ax = plt.subplots(2, 1, figsize=(9, 6.2), sharex=True, gridspec_kw={"height_ratios": [3, 2]})
+    for name in FIG_S2:
+        lg = logs[("S2", name)]
+        ax[0].plot(t, lg["Ca"], color=cols[name], lw=1.3, label=name)
+        ax[1].plot(t, lg["u"], color=cols[name], lw=1.1)
+    ax[0].plot(t, ref["r"], color=fg.INK, lw=1.0, ls="--", label="set-point")
+    e = np.asarray(cl.S2_EVENTS) * data.TS
+    for a in ax:
+        for x in e:
+            a.axvline(x, color=fg.MUTED, lw=0.8, ls=":")
+    ax[0].set(title="S2: Tf +1 K, -1 K, back; UA ramp to -5 % (dotted: events); true Ca", ylabel="Ca, mol/L")
+    ax[1].set(ylabel="Tc, K", xlabel="time, min")
+    ax[0].legend(ncol=3, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+FIG_SUP = ("K-MPC adaptive", "K-MPC adaptive, no supervisor")
+
+
+def supervisor_figure(logs, path):
+    """S5a (worst vertex of the admissible set) and S5b (outside it), reference seed: supervisor multiplier,
+    Tc and reactor temperature T, with and without the supervisor."""
+    import matplotlib.pyplot as plt
+    import figures as fg
+    cols = dict(zip(FIG_SUP, (fg.BLUE, fg.ORANGE)))
+    fig, ax = plt.subplots(3, 2, figsize=(10, 7), sharex=True, gridspec_kw={"height_ratios": [1, 2, 2]})
+    for j, scen in enumerate(("S5a", "S5b")):
+        for name in FIG_SUP:
+            lg = logs[(scen, name)]
+            t = np.arange(len(lg["u"])) * data.TS
+            ax[0, j].plot(t, lg["mult"], color=cols[name], lw=1.2, label=name)
+            ax[1, j].plot(t, lg["u"], color=cols[name], lw=1.1)
+            ax[2, j].plot(t, lg["T"], color=cols[name], lw=1.1)
+        ax[2, j].axhline(cl.IGNITION_T, color=fg.INK, lw=1.0, ls=":", label=f"ignition threshold {cl.IGNITION_T:.0f} K")
+        for a in ax[:, j]:
+            for x in np.asarray(cl.S5_EVENTS[1:3]) * data.TS:
+                a.axvline(x, color=fg.MUTED, lw=0.8, ls=":")
+        ax[0, j].set(title=f"{scen}: {'worst vertex of the set' if scen == 'S5a' else 'UA -10 %, Caf +5 % (outside)'}",
+                     ylim=(0.9, 2.1))
+        ax[2, j].set(xlabel="time, min")
+    ax[0, 0].set(ylabel="m_k")
+    ax[1, 0].set(ylabel="Tc, K")
+    ax[2, 0].set(ylabel="T, K")
+    ax[0, 0].legend(fontsize=8)
+    ax[2, 1].legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seed", type=int, default=REFERENCE_SEED)
@@ -247,7 +330,7 @@ def main():
         print(json.dumps(res["chosen"], indent=2))
         return
     s = json.loads(TUNING_FILE.read_text())["chosen"]
-    jobs = [(c, seed, lim["tc_max"], scen, name, s, mpc.NP, scen in ("S1", "S4"))
+    jobs = [(c, seed, lim["tc_max"], scen, name, s, mpc.NP, scen in KEEP_LOGS)
             for scen, names in PLAN.items() for name in names]
     if seed == REFERENCE_SEED:
         jobs += [(c, seed, lim["tc_max"], scen, "NMPC on the true model (oracle)", s, mpc.NP, False)
@@ -264,15 +347,8 @@ def main():
         if lg is not None:
             logs[(scen, name)] = lg
     s4_moves(results, logs)
-    res = {"seed": seed, "startup_block_sha256_16": block_hash,
-           "machine": {"platform": platform.platform(), "processor": platform.processor() or platform.machine(),
-                       "python": platform.python_version(), "blas_threads": 1, "workers": WORKERS},
-           "settings": {"Np": mpc.NP, "Nc": mpc.NC, "du_max": mpc.DU_MAX, "tc_min": safety.TC_MIN,
-                        "tc_max": lim["tc_max"], "sigma_y": mpc.SIGMA_Y, "sigma_u": mpc.SIGMA_U, **s,
-                        "tuning": f"outputs/mpc_tuning.json (S0, seed {REFERENCE_SEED})",
-                        "osqp": mpc.OSQP_SETTINGS, "feas_tol": mpc.FEAS_TOL, "ignition_T": cl.IGNITION_T,
-                        "band": cl.BAND, "configs": {k: dict(zip(("kind", "adapt", "supervisor"), v))
-                                                      for k, v in CONFIGS.items()}},
+    res = {"seed": seed, "startup_block_sha256_16": block_hash, "machine": machine(),
+           "settings": settings_block(lim, s),
            "tc_max": {k: lim[k] for k in ("tc_max", "worst_limit", "worst_vertex", "margin", "ca_nominal_at_tc_max")},
            "commissioning": {"sigma": c["sigma"], "lam": c["lam"]},
            "wall_s_total": wall, "results": {k: results[k] for k in sorted(results)}}
@@ -280,6 +356,10 @@ def main():
     if ("S1", "K-MPC adaptive") in logs:
         s1_figure(logs[("S1", "K-MPC adaptive")], lim["tc_max"], OUT / "fig6_s1.png")
         step_time_figure(logs, OUT / "fig6_step_time.png")
+    if ("S2", FIG_S2[-1]) in logs:
+        s2_figure(logs, OUT / "fig6_disturbance.png")
+    if ("S5b", FIG_SUP[0]) in logs:
+        supervisor_figure(logs, OUT / "fig6_supervisor.png")
     print(f"done in {wall:.0f} s")
 
 

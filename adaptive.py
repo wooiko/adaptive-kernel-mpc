@@ -121,19 +121,32 @@ class AdaptiveIdentifier:
     regressors, from the current one (data up to k) on, with inputs up to u[k+H-1].
     This is the uncertainty of the trajectory a predictive controller would rely on, not
     only of the current point. The result is recorded at sample k+1, so an input change
-    at sample j can first be seen at sample j - H + 2, H - 2 samples before it."""
+    at sample j can first be seen at sample j - H + 2, H - 2 samples before it.
+
+    anchor > 0 (anchored window, part 2 only; default 0 = the plain sliding window of
+    part 1): the oldest `anchor` rows of the initial window stay in it for good and only
+    the other window - anchor rows slide. The window length, and so the cost of a refit,
+    does not change. The SVR filter and the KRR are fitted on the same rows."""
 
     def __init__(self, sigma, lam, scaler, Z0, tz0, noise_std, window=500, thr=3.5,
                  n_jump=N_JUMP, use_filter=True, adapt=True, refit_every=10, refit_every_jump=REFIT_EVERY_JUMP,
-                 thr_jump=4.0, n_trend=6, horizon=0):
+                 thr_jump=4.0, n_trend=6, horizon=0, anchor=0):
         self.sigma, self.lam, self.sc = sigma, lam, scaler
         self.thr, self.n_jump, self.thr_jump = thr, n_jump, thr_jump
         self.use_filter, self.adapt = use_filter, adapt
         self.refit_every, self.refit_every_jump, self.horizon = refit_every, refit_every_jump, horizon
         self.noise_std = noise_std
         self.noise_z = noise_std / scaler.st
-        self.Z, self.tz = deque(Z0[-window:], maxlen=window), deque(tz0[-window:], maxlen=window)
-        self.krr = KRR(sigma, lam).fit(np.array(self.Z), np.array(self.tz))
+        if not 0 <= anchor < window:
+            raise ValueError(f"anchor must be in [0, window): {anchor}, window {window}")
+        self.anchor = anchor
+        Zw, tw = np.asarray(Z0)[-window:], np.asarray(tz0)[-window:]
+        if anchor and anchor >= len(Zw):
+            raise ValueError(f"anchor {anchor} leaves no sliding rows: only {len(Zw)} initial rows")
+        self._Za, self._tza = Zw[:anchor], tw[:anchor]            # fixed rows (empty when anchor = 0)
+        self.Z = deque(Zw[anchor:], maxlen=window - anchor)       # sliding rows
+        self.tz = deque(tw[anchor:], maxlen=window - anchor)
+        self.krr = KRR(sigma, lam).fit(*self._rows())
         self.supervisor = Supervisor(lam)
         self._consec, self._jump, self._passed, self._since = 0, False, 0, 0
         self._t, self._pending = 0, []          # sample counter; samples rejected in the current run
@@ -141,13 +154,19 @@ class AdaptiveIdentifier:
         self._mf_pending = []                 # samples rejected by the model-free test in the current run
         self._refit_svr()
 
+    def _rows(self):
+        """Training rows of the window: the fixed rows (anchor > 0) followed by the sliding ones."""
+        if not self.anchor:
+            return np.array(self.Z), np.array(self.tz)
+        return np.vstack([self._Za, np.array(self.Z)]), np.r_[self._tza, np.array(self.tz)]
+
     def _refit_svr(self):
-        Z, tz = np.array(self.Z), np.array(self.tz)
+        Z, tz = self._rows()
         self.svr = fit_svr(Z, tz, self.sigma, self.noise_z)
         self.res_std = robust_std(tz - self.svr.predict(Z))   # in-sample scatter, scaled by thr
 
     def _refit(self):
-        self.krr.fit(np.array(self.Z), np.array(self.tz))
+        self.krr.fit(*self._rows())
         if self.use_filter:
             self._refit_svr()
         self._since = 0

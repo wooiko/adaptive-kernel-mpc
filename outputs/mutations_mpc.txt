@@ -25,5 +25,8 @@ caught    hold_on_reject_off    mpc.py        K-MPC: d_k recomputed on a rejecte
 caught    supervisor_ignored    closed_loop.py  closed loop: supervisor switch ignored
 caught    pid_no_backcalc       controllers.py  PID: anti-windup back-calculation removed
 caught    nmpc_grad_sign        controllers.py  NMPC: sign of the move term in the gradient
+caught    anchor_refit_dropped  adaptive.py   anchored window: fixed rows dropped at a refit
+caught    anchor_newest         adaptive.py   anchored window: fixed rows taken from the newest instead of the oldest
+caught    readme_number_edit    README.md     README: a number of the Part 2 table edited by hand
 caught    tune_ss_ignored       run_mpc.py    tuning: steady-state limit ignored in the selection
-27 of 27 caught
+30 of 30 caught
