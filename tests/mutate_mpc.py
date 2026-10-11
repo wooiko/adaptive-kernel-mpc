@@ -8,6 +8,7 @@ tests/test_mpc.py runs there; the mutation is caught if the run fails. A mutatio
 no longer matches exactly once is reported as stale (the list must follow the code).
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -80,6 +81,14 @@ MUTATIONS = [
      "self.I += self.Kc * self.ts / self.tau_i * e", "PID: anti-windup back-calculation removed"),
     ("nmpc_grad_sign", "controllers.py", "+ mpc.difference_matrix(Nc).T @ (2.0 * w * dU)",
      "- mpc.difference_matrix(Nc).T @ (2.0 * w * dU)", "NMPC: sign of the move term in the gradient"),
+    ("anchor_refit_dropped", "adaptive.py", "        self.krr.fit(*self._rows())\n        if self.use_filter:",
+     "        self.krr.fit(np.array(self.Z), np.array(self.tz))\n        if self.use_filter:",
+     "anchored window: fixed rows dropped at a refit"),
+    ("anchor_newest", "adaptive.py", "self._Za, self._tza = Zw[:anchor], tw[:anchor]",
+     "self._Za, self._tza = Zw[len(Zw) - anchor:], tw[len(tw) - anchor:]",
+     "anchored window: fixed rows taken from the newest instead of the oldest"),
+    ("readme_number_edit", "README.md", r"re:(\| S1, set-point steps: IAE, mol/L min \| \d+\.)(\d)",
+     r"\g<1>9\g<2>", "README: a number of the Part 2 table edited by hand"),
     ("tune_ss_ignored", "run_mpc.py", 'r.get("violations", 0) == 0 and r["ss_max"] <= SS_LIMIT]',
      'r.get("violations", 0) == 0]', "tuning: steady-state limit ignored in the selection"),
 ]
@@ -88,6 +97,11 @@ MUTATIONS = [
 def copy_repo(dst):
     for f in ROOT.glob("*.py"):
         shutil.copy2(f, dst / f.name)
+    shutil.copy2(ROOT / "README.md", dst / "README.md")
+    (dst / "outputs").mkdir()
+    for f in ROOT.glob("outputs/*"):          # result files read by the tests (P4, P12)
+        if f.suffix in (".json", ".md"):
+            shutil.copy2(f, dst / "outputs" / f.name)
     (dst / "tests").mkdir()
     for f in (ROOT / "tests").glob("*.py"):
         shutil.copy2(f, dst / "tests" / f.name)
@@ -112,11 +126,16 @@ def main():
         for mid, fname, old, new, what in MUTATIONS:
             d = Path(tmp) / mid; d.mkdir(); copy_repo(d)
             src = (d / fname).read_text(encoding="utf-8")
-            if src.count(old) != 1:
+            if old.startswith("re:"):             # regular expression: the first match is changed
+                n_match = len(re.findall(old[3:], src))
+                src_new = re.sub(old[3:], new, src, count=1)
+            else:
+                n_match, src_new = src.count(old), src.replace(old, new)
+            if n_match < 1 or (not old.startswith("re:") and n_match != 1):
                 verdict = "STALE"
                 survived += 1
             else:
-                (d / fname).write_text(src.replace(old, new), encoding="utf-8")
+                (d / fname).write_text(src_new, encoding="utf-8")
                 verdict = "survived" if run_tests(d) else "caught"
                 survived += verdict == "survived"
             lines.append(f"{verdict:8s}  {mid:20s}  {fname:12s}  {what}")

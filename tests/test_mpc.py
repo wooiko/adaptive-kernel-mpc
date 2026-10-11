@@ -3,6 +3,8 @@
 
     python -m unittest discover -s tests
 """
+import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -19,6 +21,7 @@ import mpc  # noqa: E402
 import pipeline as pl  # noqa: E402
 import safety  # noqa: E402
 from adaptive import AdaptiveIdentifier, Scaler, regression_set, run_online  # noqa: E402
+from kernel import KRR as KRRRef  # noqa: E402
 
 IDENT = Y = U = SC = X0 = T0 = None
 G_REL_TOL = 1e-5          # TZ section 9: G against central differences of the free run
@@ -715,6 +718,140 @@ class TuningRule(unittest.TestCase):
         self.assertEqual(rm.select(rows)["tv"], 30.0)       # within 5 % of the best admissible (1.04)
         with self.assertRaises(ValueError):
             rm.select(rows[:1])
+
+
+class AnchoredWindow(unittest.TestCase):
+    """TZ 14, D10. Mutations: anchor rows dropped at a refit; anchor taken from the newest rows."""
+    A, W = 100, 300
+
+    def _fed(self, anchor):
+        ident = AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=self.W, anchor=anchor)
+        rng = np.random.default_rng(5)
+        idx = rng.integers(0, len(X0), 2 * self.W)             # more new rows than the window holds
+        X, t = X0[idx] + rng.normal(0, 1e-3, (len(idx), X0.shape[1])), T0[idx]
+        ident.learn(X, t, np.zeros(len(idx), int))
+        return ident, SC.x(X), SC.t(t)
+
+    def test_anchor_rows_stay_and_the_rest_slides(self):
+        ident, Zn, tn = self._fed(self.A)
+        Z, tz = ident._rows()
+        self.assertEqual(len(Z), self.W)
+        np.testing.assert_array_equal(Z[:self.A], SC.x(X0)[-self.W:][:self.A])   # the oldest rows of the window
+        np.testing.assert_array_equal(tz[:self.A], SC.t(T0)[-self.W:][:self.A])
+        np.testing.assert_allclose(Z[self.A:], Zn[-(self.W - self.A):])
+        ref = KRRRef(3.0, 1e-4).fit(Z, tz)                       # the window model is fitted on all of them
+        np.testing.assert_allclose(ident.krr.predict(Z[:20]), ref.predict(Z[:20]), rtol=1e-10, atol=1e-12)
+
+    def test_anchor_zero_is_the_plain_sliding_window(self):
+        ident, Zn, tn = self._fed(0)
+        Z, tz = ident._rows()
+        np.testing.assert_allclose(Z, Zn[-self.W:])
+        np.testing.assert_allclose(tz, tn[-self.W:])
+
+    def test_edge_cases(self):
+        for a in (-1, self.W):
+            with self.assertRaises(ValueError):
+                AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=self.W, anchor=a)
+        with self.assertRaises(ValueError):                      # fewer initial rows than the anchor
+            AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0)[:50], SC.t(T0)[:50], data.NOISE_STD, window=self.W,
+                               anchor=self.A)
+
+    def test_configuration_uses_the_anchor(self):
+        import run_mpc as rm
+        Z = np.tile(SC.x(X0), (3, 1))
+        c = {"sigma": 3.0, "lam": 1e-4, "scaler": SC, "Z": Z, "tz": np.tile(SC.t(T0), 3), "noise": data.NOISE_STD,
+             "thr": {pl.ALPHA: 3.5}}
+        s = {"rho": 1.0, "beta": 0.1}
+        _, ident = rm.make("K-MPC adaptive, anchored window", c, 300.0, s)
+        self.assertEqual(ident.anchor, rm.ANCHOR)
+        self.assertEqual(len(ident._rows()[0]), pl.WINDOW)
+        _, plain = rm.make("K-MPC adaptive", c, 300.0, s)
+        self.assertEqual(plain.anchor, 0)
+
+
+OUT = Path(__file__).resolve().parents[1] / "outputs"
+PART1_TIME_KEYS = ("loo_grid_seconds",)                       # the only time field of part 1 (run_demo.py)
+PART1_TIME_LINE = re.compile(r"^- Leave-one-out search over .* s\.$")   # report.md line that prints it
+PART1_SHA256 = {   # outputs of part 1 at commit b4cf76f (P12), time field and its report line removed
+    "metrics.json": "9c39ee82f16070638d9e2b0d0c3097e1621a64f600d4c3a5e2516239919ea850",
+    "seeds.json": "69345bfac03cad40dc330862a323c7940cf04b26ec4f9e57a2440c33402b09c2",
+    "report.md": "3851da477da1af6b1b0974f8c5e6034da6cfba9444c64c0a12c02c4c75bf8d0c",
+}
+
+
+def part1_normalised(name, raw):
+    """Content of a part 1 result file without its time field, for the comparison with b4cf76f."""
+    text = raw.decode("utf-8").replace("\r\n", "\n")
+    if name.endswith(".json"):
+        def drop(o):
+            if isinstance(o, dict):
+                return {k: drop(v) for k, v in o.items() if k not in PART1_TIME_KEYS}
+            if isinstance(o, list):
+                return [drop(v) for v in o]
+            return o
+        return json.dumps(drop(json.loads(text)), sort_keys=True).encode()
+    return "\n".join(line for line in text.split("\n") if not PART1_TIME_LINE.match(line)).encode()
+
+
+class Part1Unchanged(unittest.TestCase):
+    """P12: the part 1 results, recomputed after the part 2 changes, are those of commit b4cf76f apart from the
+    time of the leave-one-out search."""
+    def test_files_equal_reference(self):
+        import hashlib
+        for name, ref in PART1_SHA256.items():
+            self.assertEqual(hashlib.sha256(part1_normalised(name, (OUT / name).read_bytes())).hexdigest(), ref, name)
+
+
+_TIME_KEYS = ("step_ms", "ident_ms", "wall_s", "wall_s_total")
+
+
+def _no_time(o):
+    if isinstance(o, dict):
+        return {k: _no_time(v) for k, v in o.items() if k not in _TIME_KEYS}
+    if isinstance(o, list):
+        return [_no_time(v) for v in o]
+    return o
+
+
+class SeedResults(unittest.TestCase):
+    """The 20-seed file repeats seed 0 of run_mpc.py: same numbers apart from the time fields (P5)."""
+    def test_seed0_equals_reference_run(self):
+        import json
+        S = json.loads((OUT / "mpc_seeds.json").read_text())
+        R0 = json.loads((OUT / "mpc_metrics.json").read_text())
+        s0 = S["by_seed"][str(R0["seed"])]
+        self.assertEqual(s0["startup_block_sha256_16"], R0["startup_block_sha256_16"])
+        for scen, rr in s0["results"].items():
+            for conf, m in rr.items():
+                self.assertEqual(_no_time(m), _no_time(R0["results"][scen][conf]), (scen, conf))
+        self.assertEqual(_no_time(S["settings"]), _no_time(R0["settings"]))
+
+    def test_same_startup_block_for_every_controller(self):
+        import json
+        S = json.loads((OUT / "mpc_seeds.json").read_text())
+        self.assertEqual(len(S["by_seed"]), 20)
+        hashes = [v["startup_block_sha256_16"] for v in S["by_seed"].values()]
+        self.assertEqual(len(set(hashes)), len(hashes))           # one block per seed, shared by its runs (P10)
+
+
+class ReadmeNumbers(unittest.TestCase):
+    """P4. Mutation: a number of the Part 2 section of README.md edited by hand."""
+    def test_section_matches_results(self):
+        import report_mpc as rp
+        S, R0, *_ = rp.load()
+        text = rp.README.read_text(encoding="utf-8")
+        self.assertEqual(rp.check_readme_numbers(text, S, R0), [])
+
+    def test_table_values_from_json_directly(self):
+        import json
+        import report_mpc as rp
+        S = json.loads((OUT / "mpc_seeds.json").read_text())
+        text = rp.README.read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if line.startswith("| S1, set-point steps: IAE"))
+        cells = [c.strip() for c in row.strip("|").split("|")][1:]
+        for conf, cell in zip(rp.README_CONFS, cells):
+            v = [S["by_seed"][s]["results"]["S1"][conf]["iae_total"] for s in S["by_seed"]]
+            self.assertEqual(cell, f"{np.median(v):.4f}", conf)
 
 
 class Scenarios(unittest.TestCase):
