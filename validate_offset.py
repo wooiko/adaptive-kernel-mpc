@@ -138,9 +138,9 @@ def evaluate(rows, sets):
                                                  "mean_diff_1e3": float(D[:, i].mean()),
                                                  "max_abs_diff_1e3": float(np.max(np.abs(D[:, i]))), "pass": bool(ok)})
                     res["b"]["pass"] &= bool(ok)
-    res["a"]["pass"] = not res["a"]["violations"]
+    res["a"]["pass"] = bool(not res["a"]["violations"])
     res["c"]["gamma_min"] = None if gmin == np.inf else float(gmin)
-    res["c"]["pass"] = gmin != np.inf and gmin >= C_GAMMA
+    res["c"]["pass"] = bool(gmin != np.inf and gmin >= C_GAMMA)
     if "V5" in sets:
         for scen in SETS["V5"]:
             F, A = get(rows, scen, FIXED), get(rows, scen, "K-MPC adaptive")
@@ -184,6 +184,7 @@ def main():
                       f"{max(worst):.2f}", flush=True)
     elif args.repeat:
         rows = run(RESERVE, [args.repeat], CONFIGS)
+        (rm.OUT / "mpc_validation_repeat_rows.json").write_text(json.dumps(rows))
         res = evaluate(rows, [args.repeat])
         ok = res["a"]["pass"] and res["b"]["pass"] and res["c"]["pass"]
         out = {"seeds": list(RESERVE), "set": args.repeat, "criteria": res, "passed": bool(ok), "rows": rows}
@@ -191,6 +192,7 @@ def main():
         print("repeat passed" if ok else "repeat not passed", flush=True)
     else:
         rows = run(SEEDS, list(SETS), CONFIGS)
+        (rm.OUT / "mpc_validation_rows.json").write_text(json.dumps(rows))    # kept even if the evaluation fails
         res = evaluate(rows, list(SETS))
         out = {"seeds": list(SEEDS), "criteria": res, **decide(res), "rows": rows}
         path = rm.OUT / "mpc_validation.json"
