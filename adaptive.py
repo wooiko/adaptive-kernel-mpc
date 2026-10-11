@@ -131,7 +131,11 @@ class AdaptiveIdentifier:
     refit_check (part 2 only; default None = every refit is kept, as in part 1): a function
     (identifier, new KRR) -> bool called at every refit of the window KRR; if it returns False the
     new fit is discarded and the previous model stays (counted in n_refit_rejected). The rows stay
-    in the window, and the SVR filter is refitted as usual."""
+    in the window, and the SVR filter is refitted as usual.
+
+    learning (part 2; default True, as in part 1): while False, accepted and restored samples are not
+    added to the window, so neither the KRR nor the SVR is refitted; the caller sets it at every sample
+    (closed_loop.run_loop, argument learn_after_change)."""
 
     def __init__(self, sigma, lam, scaler, Z0, tz0, noise_std, window=500, thr=3.5,
                  n_jump=N_JUMP, use_filter=True, adapt=True, refit_every=10, refit_every_jump=REFIT_EVERY_JUMP,
@@ -146,6 +150,7 @@ class AdaptiveIdentifier:
             raise ValueError(f"anchor must be in [0, window): {anchor}, window {window}")
         self.anchor = anchor
         self.refit_check, self.n_refit, self.n_refit_rejected = refit_check, 0, 0
+        self.learning, self.n_rows_added = True, 0   # part 2: set by the caller; False = no new rows in the window
         Zw, tw = np.asarray(Z0)[-window:], np.asarray(tz0)[-window:]
         if anchor and anchor >= len(Zw):
             raise ValueError(f"anchor {anchor} leaves no sliding rows: only {len(Zw)} initial rows")
@@ -190,9 +195,9 @@ class AdaptiveIdentifier:
         ago) to the window."""
         for x, v, b in sorted(zip(X, y, back), key=lambda r: -r[2]):
             self._acc.append((self._t - b, float(v)))
-            if self.adapt:
+            if self.adapt and self.learning:
                 self.Z.append(self.sc.x(x)); self.tz.append(self.sc.t(v))
-                self._since += 1
+                self._since += 1; self.n_rows_added += 1
         if self.adapt and self._since:
             self._refit()
 
@@ -279,9 +284,9 @@ class AdaptiveIdentifier:
         accept = not missing and not flagged
         if accept and not restore:
             self._acc.append((self._t, float(y_meas)))
-            if self.adapt:
+            if self.adapt and self.learning:
                 self.Z.append(z[0]); self.tz.append(self.sc.t(y_meas))
-                self._since += 1
+                self._since += 1; self.n_rows_added += 1
                 if self._since >= (self.refit_every_jump if self._jump else self.refit_every):
                     self._refit()
         return {"pred": pred, "flagged": flagged, "jump": self._jump, "restore": restore,

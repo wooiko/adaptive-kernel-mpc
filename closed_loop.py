@@ -30,7 +30,8 @@ IGNITION_T = 350.0   # K. On the cold branch T stays below it at every vertex of
                      # it (both computed in tests/test_mpc.py, class IgnitionThreshold).
 BAND = 0.005         # mol/L, settling band (TZ 8)
 SS_WINDOW = 50       # samples (5 min): steady-state error = mean over the last 5 min of a segment (TZ 8)
-SCENARIO_IDS = {"S0": 10, "S1": 11, "S2": 12, "S3": 13, "S4": 14, "S5a": 15, "S5b": 16, "S6": 17}  # >= 10 (P5)
+SCENARIO_IDS = {"S0": 10, "S1": 11, "S2": 12, "S3": 13, "S4": 14, "S5a": 15, "S5b": 16, "S6": 17,  # >= 10 (P5)
+                "D1": 21, "Ta": 22, "S2r": 23}   # validation of D14 (validate_offset.py); D1, Ta as in the analysis
 S1_HOLD, S1_INIT = 100, 50   # samples: 10 min per set-point (TZ 8), 5 min on the initial one
 S1_BELOW_LIMIT = 0.25        # K: the set-point near the limit is the nominal Ca at Tc_max - 0.25 K
 
@@ -83,10 +84,13 @@ def measurement_noise(n, noise_seed, anomaly_rate=data.ANOMALY_RATE, gaps=()):
     return add, spike, missing
 
 
-def run_loop(plant, x0, ident, controller, r, add, missing, u0, supervisor=True):
+def run_loop(plant, x0, ident, controller, r, add, missing, u0, supervisor=True, learn_after_change=None):
     """Run len(r) samples. x0: initial state; u0: input held before the controller starts (samples 0, 1).
     ident: identifier (its `horizon` sets the length of u_plan); controller: step(k, y, u, r_k, info) and
     planned_inputs(u_prev, n). supervisor=False: the controller gets m_k = 1 (the regime is still logged).
+    learn_after_change = N (TZ 14, D14): the identifier adds rows to its window only at samples k with a
+    set-point change at some j, j < k <= j + N (the row of sample k holds y_k and the input u_k-1, decided
+    after the change); at other samples ident.learning is False. None: always learning (default).
     Returns the step log (arrays)."""
     n = len(r)
     H = getattr(ident, "horizon", 0)
@@ -99,6 +103,7 @@ def run_loop(plant, x0, ident, controller, r, add, missing, u0, supervisor=True)
     log.update({"flagged_rt": np.zeros(n, bool), "regime": np.zeros(n, int), "fallback": np.zeros(n, bool),
                 "restored": np.zeros(n, bool), "status": [""] * n})
     X[0] = x0
+    last_change = None
     for k in range(n):
         if k > 0:
             X[k] = plant.step(X[k - 1], u[k - 1], k - 1)
@@ -107,6 +112,10 @@ def run_loop(plant, x0, ident, controller, r, add, missing, u0, supervisor=True)
             y_hist[k] = log["y_rt"][k] = y_meas[k] if np.isfinite(y_meas[k]) else plant.ca(x0)
             continue
         u_plan = controller.planned_inputs(u[k - 1], H - 1) if H else None
+        if learn_after_change is not None:
+            if r[k - 1] != r[k - 2]:
+                last_change = k - 1
+            ident.learning = last_change is not None and k - last_change <= learn_after_change
         t0 = time.perf_counter()
         res = ident.step(regressor(y_hist, u, k - 1), y_meas[k], u_plan)
         y_hist[k] = log["y_rt"][k] = res["y_keep"]
@@ -318,6 +327,53 @@ def scenario_s6(seed, tc_max):
               np.full(S6_HOLD[2], lo), np.full(S6_HOLD[3], mid)]
     starts = [int(v) for v in S1_INIT + np.cumsum((0,) + S6_HOLD[:-1])]
     return _build("S6", seed, r, lambda k: cstr.CSTRParams(), safety.cold_steady_state(296.0), 296.0, starts)
+
+
+D1_EVENTS = (100, 250, 550, 1900)   # Tf step; UA ramp start, end; end of the run
+D1_SEG = 150                        # samples per segment after the ramp
+
+
+def scenario_d1(seed, tc_max):
+    """D1 (validation, D14): constant set-point = nominal Ca at Tc uniform in [TC_MIN + S0_TC_DIST[0],
+    tc_max - S0_TC_DIST[1]] (own stream); Tf step of random sign by S0_TF_STEP at sample 100; UA ramp to S0_UA_END
+    over samples 250-550; then constant disturbance to sample 1900, in segments of 150 samples (long time
+    without a set-point change)."""
+    rng, _ = data.streams(seed, SCENARIO_IDS["D1"])
+    tc_r = rng.uniform(safety.TC_MIN + S0_TC_DIST[0], tc_max - S0_TC_DIST[1])
+    tf = float(rng.choice([-1.0, 1.0]) * S0_TF_STEP)
+    e = D1_EVENTS
+    x0 = safety.cold_steady_state(tc_r)
+    params = lambda k: _with(Tf=tf if k >= e[0] else 0.0, UA=_ramp(k, e[1], e[2], 1.0, S0_UA_END))
+    starts = [e[0], e[1]] + list(range(e[2], e[3], D1_SEG))
+    return _build("D1", seed, np.full(e[3], x0[0]), params, x0, tc_r, starts,
+                  hold_segments=[0] + list(range(2, len(starts))), tc_setpoint=tc_r, tf_step=tf)
+
+
+TA_STEP, TA_N = 1050, 1200          # Ta: nominal plant, Tf +1 K at sample 1050, end at 1200
+
+
+def scenario_ta(seed, tc_max):
+    """Ta (validation, D14): the S2 set-point, nominal plant for TA_STEP samples, then only a Tf step of +S0_TF_STEP.
+    Segments with a constant disturbance at their end: the 150 samples before the step and those after it."""
+    x0 = safety.cold_steady_state(S2_TC)
+    params = lambda k: _with(Tf=S0_TF_STEP if k >= TA_STEP else 0.0)
+    return _build("Ta", seed, np.full(TA_N, x0[0]), params, x0, S2_TC, [TA_STEP - 150, TA_STEP],
+                  hold_segments=[0, 1])
+
+
+S2R_EVENTS = (100, 400, 550, 700, 850)   # UA ramp to -5 % from 100 to 400; Tf +1 K, -1 K, back
+
+
+def scenario_s2r(seed, tc_max):
+    """S2r (validation, D14): S2 with the events in reverse order: UA ramp to 0.95 over samples 100-400, then
+    Tf +1 K at 550, -1 K at 700, back at 850; 1000 samples."""
+    e = S2R_EVENTS
+
+    def params(k):
+        tf = 1.0 if e[2] <= k < e[3] else (-1.0 if e[3] <= k < e[4] else 0.0)
+        return _with(UA=_ramp(k, e[0], e[1], 1.0, 0.95), Tf=tf)
+    x0 = safety.cold_steady_state(S2_TC)
+    return _build("S2r", seed, np.full(S2_N, x0[0]), params, x0, S2_TC, e, hold_segments=[1, 2, 3, 4])
 
 
 SCENARIOS = {"S0": scenario_s0, "S1": scenario_s1, "S2": scenario_s2, "S3": scenario_s3, "S4": scenario_s4,

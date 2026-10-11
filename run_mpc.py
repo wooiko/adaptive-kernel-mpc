@@ -43,6 +43,9 @@ TUNE_TOL = 0.05                           # selection on S0: settings within 5 %
 SS_LIMIT = 0.001                          # mol/L: candidates must also meet the steady-state requirement of TZ 9
                                           # (S2 threshold) on the disturbance segments of S0, not of S2 (P3)
 
+N_EXC = 50                                # D14: rows enter the window only for N_EXC samples after a set-point
+                                          # change: 4 time constants of the start-up FOPDT model (tau = 1.269 min,
+                                          # outputs/mpc_tuning.json: 50.8 samples), rounded to 50; set a priori
 ANCHOR = 500                              # anchored window (TZ 14, D10): the oldest 500 of the 1000 rows of the
                                           # initial window stay in it; set a priori, not tuned (P3)
 
@@ -56,6 +59,7 @@ CONFIGS = {
     "K-MPC adaptive, anchored window": ("kmpc_anchored", True, True),
     "K-MPC adaptive, sign gate": ("kmpc_gate", True, True),           # D13: refit kept only if dCa/dTc < 0
     "K-MPC adaptive, anchored window, sign gate": ("kmpc_anchored_gate", True, True),
+    "K-MPC adaptive, excitation window": ("kmpc_exc", True, True),   # D14: R1 + R2 of the S2 offset analysis
     "NMPC on the same KRR": ("nmpc", True, True),
     "K-MPC adaptive, symmetric penalty": ("kmpc_sym", True, True),
     "K-MPC adaptive, no filter": ("kmpc_nofilter", True, True),
@@ -84,9 +88,23 @@ def commissioning(seed):
     return pl.commission(y, u, seed=seed), h
 
 
+def initial_window_whole_record(c, window=pl.WINDOW):
+    """D14 (R2): the initial window of the identifier is `window` rows taken evenly over the whole start-up record,
+    not its last rows (the order of the record is kept)."""
+    idx = np.unique(np.round(np.linspace(0, len(c["Z"]) - 1, window)).astype(int))
+    return {**c, "Z": c["Z"][idx], "tz": c["tz"][idx]}
+
+
+def learn_after_change(name):
+    """N for closed_loop.run_loop(learn_after_change=N): D14 configurations only."""
+    return N_EXC if CONFIGS[name][0] == "kmpc_exc" else None
+
+
 def make(name, c, lim, s, Np=mpc.NP):
     """Controller and identifier of one configuration. s: frozen settings (rho, beta, PID)."""
     kind, adapt, _ = CONFIGS[name]
+    if kind == "kmpc_exc":
+        c = initial_window_whole_record(c)
     ident = pl.identifier(c, horizon=Np, adapt=adapt, use_filter=(kind != "kmpc_nofilter"),
                           anchor=(ANCHOR if kind.startswith("kmpc_anchored") else 0),
                           refit_check=(mpc.sign_gate if kind.endswith("_gate") else None))
@@ -114,10 +132,12 @@ def job(args):
         ctrl, ident = make(name, c, lim, s, Np)
         t0 = time.perf_counter()
         log = cl.run_loop(sc["plant"], sc["x0"], ident, ctrl, sc["r"], sc["add"], sc["missing"], sc["u0"],
-                          supervisor=CONFIGS[name][2])
+                          supervisor=CONFIGS[name][2], learn_after_change=learn_after_change(name))
         wall = time.perf_counter() - t0
         m = cl.run_metrics(log, sc["starts"], safety.TC_MIN, lim, mpc.DU_MAX)
         m["wall_s"] = wall
+        if learn_after_change(name) is not None:
+            m["rows_added"] = int(ident.n_rows_added)
         m.update(scenario_extras(scen, sc, log, m))
         keep_keys = ("Ca", "T", "u", "r", "y_meas", "mult", "regime", "flagged_rt", "fallback", "t_ctrl_ms")
         return scen, name, m, ({k: np.asarray(log[k]).tolist() for k in keep_keys} if keep else None)
