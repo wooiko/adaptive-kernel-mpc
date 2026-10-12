@@ -561,6 +561,103 @@ class Metrics(unittest.TestCase):
             log["T"] = np.r_[330.0, 331.0, tmax, 332.0, 333.0]
             self.assertEqual(cl.run_metrics(log, [2], 292.0, 300.0, 1.0)["ignition"], ign)
 
+    def test_violations(self):
+        """Mutation: moves above du_max not counted. Box above, box below and one too large move are each counted once;
+        values exactly on the limits are not violations."""
+        log = {"Ca": np.zeros(5), "r": np.zeros(5), "y_meas": np.zeros(5), "T": np.full(5, 330.0),
+               "fallback": np.zeros(5, bool), "status": ["solved"] * 5, "t_ctrl_ms": np.ones(5),
+               "t_ident_ms": np.ones(5), "regime": np.zeros(5, int), "flagged_rt": np.zeros(5, bool)}
+        for u, du_max, want in (([299.0, 300.0, 300.0, 299.0, 298.0], 1.0, 0),      # on the limits
+                                ([299.0, 299.5, 300.0, 300.001, 300.0], 10.0, 1),   # above u_max
+                                ([293.0, 292.5, 292.0, 291.999, 292.0], 10.0, 1),   # below u_min
+                                ([295.0, 296.0, 297.0, 298.01, 298.5], 1.0, 1)):    # one move of 1.01 K
+            log["u"] = np.array(u)
+            self.assertEqual(cl.run_metrics(log, [2], 292.0, 300.0, du_max)["violations"], want, u)
+
+
+class SupervisorPlan(unittest.TestCase):
+    """P2, TZ 6.2: at sample k the supervisor checks the controller's last plan (made at k-1) shifted by one step,
+    u_k .. u_k+H-2, held after the control horizon. Mutation: the plan for the supervisor not shifted."""
+    def test_planned_inputs(self):
+        c = mpc.KMPC(mpc.linear_model(TH), 1e3, 0.1, Nc=3, u_min=-1e3, du_max=1e3)
+        np.testing.assert_array_equal(c.planned_inputs(7.0, 4), [7.0] * 4)        # no plan yet: u_k-1 held
+        c.V = np.array([1.0, 2.0, 3.0])                                            # u_k-1, u_k, u_k+1 planned at k-1
+        np.testing.assert_array_equal(c.planned_inputs(1.0, 4), [2.0, 3.0, 3.0, 3.0])
+
+    def test_loop_passes_the_shifted_plan(self):
+        H, n = 6, 30
+        ident = _PlanRecorder(H)
+        ctrl = _VRecorder(mpc.KMPC(mpc.linear_model(TH), 1e3, 0.1, u_min=-1e3, du_max=1e3))
+        r = np.r_[np.zeros(10), np.full(n - 10, 0.5)]
+        cl.run_loop(cl.LinearPlant(TH), np.zeros(3), ident, ctrl, r, np.zeros(n), np.zeros(n, bool), 0.0)
+        np.testing.assert_array_equal(ident.plans[cl.LAG], np.zeros(H - 1))
+        for k in range(cl.LAG + 1, n):
+            V = ctrl.V[k - 1]
+            np.testing.assert_array_equal(ident.plans[k], (mpc.blocking_matrix(H, len(V)) @ V)[1:], k)
+            self.assertEqual(ident.plans[k][0], V[1])
+
+
+class _PlanRecorder(PassThrough):
+    """Identifier stand-in with a horizon that records the plan u_plan it gets at every sample."""
+    def __init__(self, horizon): self.horizon, self.plans = horizon, {}
+
+    def step(self, x, y, u_plan=None):
+        self.plans[len(self.plans) + cl.LAG] = np.array(u_plan)
+        return super().step(x, y, u_plan)
+
+
+class _VRecorder:
+    """Wraps a K-MPC and keeps its plan V after the step at every sample."""
+    def __init__(self, ctrl): self.c, self.V = ctrl, {}
+    def planned_inputs(self, u_prev, n): return self.c.planned_inputs(u_prev, n)
+
+    def step(self, k, y, u, r, info):
+        out = self.c.step(k, y, u, r, info)
+        self.V[k] = self.c.V.copy()
+        return out
+
+
+def _metrics_stub(**kw):
+    return {"violations": 0, "ignition": False, "max_T": 330.0, "ss_error_max_abs_hold": 0.0005, "fallback_steps": 0,
+            "n_steps": 1000, "step_ms": {"median": 1.0, "p95": 2.0, "max": 3.0}, **kw}
+
+
+class ReportAcceptance(unittest.TestCase):
+    """TZ 9 checks as report_mpc.criteria decides them, on synthetic result files: violations over all runs (S5b
+    included); ignition and fallback (D11) only inside the admissible set. Mutations: fallback steps of S5b counted in
+    the D11 share; violations counted inside the set only."""
+    def files(self, changes):
+        import run_mpc as rm
+        res = {sc: {c: _metrics_stub() for c in names} for sc, names in rm.PLAN.items()}
+        for (sc, c), kw in changes.items():
+            res[sc][c].update(kw)
+        S = {"by_seed": {"0": {"results": res}}}
+        return S, {"seed": 0, "results": {"S1": {"PID": _metrics_stub()}}}
+
+    def verdict(self, changes):
+        import report_mpc as rp
+        return {c["id"]: c["pass"] for c in rp.criteria(*self.files(changes))}
+
+    def test_all_pass(self):
+        self.assertTrue(all(self.verdict({}).values()))
+
+    def test_scope_of_each_check(self):
+        v = self.verdict({("S5b", "K-MPC adaptive"): {"fallback_steps": 1000, "ignition": True, "max_T": 480.0}})
+        self.assertTrue(v["fallback"] and v["ignition"])                         # S5b is outside the set
+        self.assertFalse(self.verdict({("S5a", "K-MPC adaptive"): {"fallback_steps": 7}})["fallback"])  # 7 of 6000
+        self.assertFalse(self.verdict({("S4", "K-MPC static"): {"ignition": True}})["ignition"])
+        self.assertFalse(self.verdict({("S5b", "PID"): {"violations": 1}})["violations"])   # every run counts
+        self.assertFalse(self.verdict({("S2", "K-MPC adaptive"): {"ss_error_max_abs_hold": 0.0011}})["s2"])
+        self.assertFalse(self.verdict({("S5b", "K-MPC static"): {"step_ms": {"median": 1.0, "p95": 61.0,
+                                                                             "max": 70.0}}})["step_time"])
+
+    def test_table_cells_keep_their_pipes(self):
+        """A '|' inside a cell (|dTc|) is escaped: every row of the table has as many cell separators as the header."""
+        import report_mpc as rp
+        lines = rp.md_table(["Check", "|x|, K"], [["|dTc| <= 1", "a"], ["b", "|e|"]]).split("\n")
+        n = [len(re.findall(r"(?<!\\)\|", line)) for line in lines]
+        self.assertEqual(set(n), {3})
+
 
 class IgnitionThreshold(unittest.TestCase):
     """Source of IGNITION_T: cold branch below it at Tc_max on every vertex; hot state far above it."""
@@ -718,6 +815,45 @@ class TuningRule(unittest.TestCase):
         self.assertEqual(rm.select(rows)["tv"], 30.0)       # within 5 % of the best admissible (1.04)
         with self.assertRaises(ValueError):
             rm.select(rows[:1])
+
+    def test_grid_position(self):
+        """P9: a chosen setting on the edge of its grid is named. Mutation: wrong index of the lower edge."""
+        import run_mpc as rm
+        self.assertEqual(rm.grid_position(0.3, rm.RHOS), "lower edge")
+        self.assertEqual(rm.grid_position(1.0, rm.RHOS), "interior")
+        self.assertEqual(rm.grid_position(30.0, rm.RHOS), "upper edge")
+        with self.assertRaises(ValueError):
+            rm.grid_position(2.0, rm.RHOS)
+        T = json.loads(rm.TUNING_FILE.read_text())
+        pos = rm.chosen_grid_positions(T)
+        self.assertEqual(set(pos), {"rho", "beta", "tau_c"})
+        for v, lo, hi, _ in pos.values():
+            self.assertTrue(lo <= v <= hi)
+
+
+class SameStartupBlock(unittest.TestCase):
+    """P10: every configuration of run_mpc is built from the commissioning result it is given (one start-up block per
+    seed, the same for all controllers): the identifier's scaler and window rows, the static KRR and the OE model."""
+    def test_every_configuration_from_the_given_block(self):
+        import run_mpc as rm
+        c = {"sigma": 3.0, "lam": 1e-4, "scaler": SC, "Z": np.tile(SC.x(X0), (3, 1)), "tz": np.tile(SC.t(T0), 3),
+             "noise": data.NOISE_STD, "thr": {pl.ALPHA: 3.5}, "Xc": X0, "tc": T0, "y_clean": Y, "u": U}
+        s = {"rho": 1.0, "beta": 0.1, "pid": {"Kc": -100.0, "tau_i": 1.0, "tau_c": 0.45}}
+        rows = {z.tobytes() for z in c["Z"]}
+        x = X0[100]
+        f_static = float(pl.StaticKRR(c).predict(x)[0])
+        f_oe = float(pl.LinearOE(c).predict(x)[0])
+        for name in rm.CONFIGS:
+            ctrl, ident = rm.make(name, c, 300.0, s)
+            self.assertIs(ident.sc, c["scaler"], name)
+            self.assertTrue(all(z.tobytes() in rows for z in ident._rows()[0]), name)
+            kind = rm.CONFIGS[name][0]
+            if kind == "kmpc_static":
+                self.assertEqual(ctrl.model.f(x), f_static)
+            elif kind == "lmpc":
+                self.assertAlmostEqual(ctrl.model.f(x), f_oe, places=12)
+            elif kind not in ("pid", "true"):
+                self.assertEqual(ctrl.model.f(x), ident.predict(x), name)
 
 
 class AnchoredWindow(unittest.TestCase):

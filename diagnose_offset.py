@@ -11,6 +11,7 @@ test data. Every PROBE_EVERY samples it records:
   * the standard deviation of Tc over the rows of the identifier's window.
 
     python diagnose_offset.py             # writes outputs/mpc_diag_offset.json
+    python diagnose_offset.py "K-MPC adaptive, sign gate;K-MPC adaptive, anchored window, sign gate" mpc_diag_offset_gate.json
 """
 import os
 
