@@ -126,11 +126,20 @@ class AdaptiveIdentifier:
     anchor > 0 (anchored window, part 2 only; default 0 = the plain sliding window of
     part 1): the oldest `anchor` rows of the initial window stay in it for good and only
     the other window - anchor rows slide. The window length, and so the cost of a refit,
-    does not change. The SVR filter and the KRR are fitted on the same rows."""
+    does not change. The SVR filter and the KRR are fitted on the same rows.
+
+    refit_check (part 2 only; default None = every refit is kept, as in part 1): a function
+    (identifier, new KRR) -> bool called at every refit of the window KRR; if it returns False the
+    new fit is discarded and the previous model stays (counted in n_refit_rejected). The rows stay
+    in the window, and the SVR filter is refitted as usual.
+
+    learning (part 2; default True, as in part 1): while False, accepted and restored samples are not
+    added to the window, so neither the KRR nor the SVR is refitted; the caller sets it at every sample
+    (closed_loop.run_loop, argument learn_after_change)."""
 
     def __init__(self, sigma, lam, scaler, Z0, tz0, noise_std, window=500, thr=3.5,
                  n_jump=N_JUMP, use_filter=True, adapt=True, refit_every=10, refit_every_jump=REFIT_EVERY_JUMP,
-                 thr_jump=4.0, n_trend=6, horizon=0, anchor=0):
+                 thr_jump=4.0, n_trend=6, horizon=0, anchor=0, refit_check=None):
         self.sigma, self.lam, self.sc = sigma, lam, scaler
         self.thr, self.n_jump, self.thr_jump = thr, n_jump, thr_jump
         self.use_filter, self.adapt = use_filter, adapt
@@ -140,6 +149,8 @@ class AdaptiveIdentifier:
         if not 0 <= anchor < window:
             raise ValueError(f"anchor must be in [0, window): {anchor}, window {window}")
         self.anchor = anchor
+        self.refit_check, self.n_refit, self.n_refit_rejected = refit_check, 0, 0
+        self.learning, self.n_rows_added = True, 0   # part 2: set by the caller; False = no new rows in the window
         Zw, tw = np.asarray(Z0)[-window:], np.asarray(tz0)[-window:]
         if anchor and anchor >= len(Zw):
             raise ValueError(f"anchor {anchor} leaves no sliding rows: only {len(Zw)} initial rows")
@@ -166,7 +177,15 @@ class AdaptiveIdentifier:
         self.res_std = robust_std(tz - self.svr.predict(Z))   # in-sample scatter, scaled by thr
 
     def _refit(self):
-        self.krr.fit(*self._rows())
+        if self.refit_check is None:
+            self.krr.fit(*self._rows())
+        else:                                  # part 2: a refit is kept only if refit_check accepts the new model
+            cand = KRR(self.sigma, self.lam).fit(*self._rows())
+            self.n_refit += 1
+            if self.refit_check(self, cand):
+                self.krr = cand
+            else:
+                self.n_refit_rejected += 1
         if self.use_filter:
             self._refit_svr()
         self._since = 0
@@ -176,9 +195,9 @@ class AdaptiveIdentifier:
         ago) to the window."""
         for x, v, b in sorted(zip(X, y, back), key=lambda r: -r[2]):
             self._acc.append((self._t - b, float(v)))
-            if self.adapt:
+            if self.adapt and self.learning:
                 self.Z.append(self.sc.x(x)); self.tz.append(self.sc.t(v))
-                self._since += 1
+                self._since += 1; self.n_rows_added += 1
         if self.adapt and self._since:
             self._refit()
 
@@ -265,9 +284,9 @@ class AdaptiveIdentifier:
         accept = not missing and not flagged
         if accept and not restore:
             self._acc.append((self._t, float(y_meas)))
-            if self.adapt:
+            if self.adapt and self.learning:
                 self.Z.append(z[0]); self.tz.append(self.sc.t(y_meas))
-                self._since += 1
+                self._since += 1; self.n_rows_added += 1
                 if self._since >= (self.refit_every_jump if self._jump else self.refit_every):
                     self._refit()
         return {"pred": pred, "flagged": flagged, "jump": self._jump, "restore": restore,

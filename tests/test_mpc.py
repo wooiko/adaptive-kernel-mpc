@@ -854,6 +854,117 @@ class ReadmeNumbers(unittest.TestCase):
             self.assertEqual(cell, f"{np.median(v):.4f}", conf)
 
 
+class GainSign(unittest.TestCase):
+    """The physical fact behind mpc.sign_gate: on the cold branch dCa/dTc < 0 at every vertex of the admissible set,
+    also with k0 x S3_K0_END (S3), for Tc from TC_MIN to Tc_max."""
+    def test_cold_branch_gain_negative(self):
+        lim = safety.tc_max()["tc_max"]
+        pts = safety.vertices(safety.admissible_set())
+        for v in pts:
+            for k0 in (1.0, cl.S3_K0_END):
+                p = safety.params_at(v)
+                p = cl._with(p, k0=k0)
+                tc = np.linspace(safety.TC_MIN, lim, 12)
+                ca = np.array([safety.cold_steady_state(t, p)[0] for t in tc])
+                self.assertTrue(np.all(np.diff(ca) < 0), (v, k0))
+
+
+class _GradStub:
+    """KRR stand-in whose gradient, converted to physical units by sign_gate, equals g_phys."""
+    def __init__(self, g_phys, sc): self.g = np.asarray(g_phys) * sc.sx / sc.st
+    def gradient(self, z): return self.g
+
+
+class SignGate(unittest.TestCase):
+    """Mutations: sign of the gate test; a rejected refit applied anyway."""
+    def test_gate_decision(self):
+        ident = new_identifier()
+        self.assertTrue(mpc.sign_gate(ident, _GradStub([0.6, 0.2, -0.01, -0.005], SC)))
+        self.assertFalse(mpc.sign_gate(ident, _GradStub([0.6, 0.2, 0.01, 0.005], SC)))
+        self.assertFalse(mpc.sign_gate(ident, _GradStub([0.9, 0.3, -0.01, -0.005], SC)))   # 1 - a1 - a2 < 0
+        self.assertTrue(mpc.sign_gate(ident, ident.krr))          # the reactor model of this module: dCa/dTc < 0
+
+    def test_rejected_refit_keeps_the_model(self):
+        ident = AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=400,
+                                   refit_check=lambda idt, cand: False)
+        before = ident.krr
+        alpha = before.alpha.copy()
+        ident.learn(X0[:30], T0[:30] + 0.01, np.zeros(30, int))
+        self.assertIs(ident.krr, before)
+        np.testing.assert_array_equal(ident.krr.alpha, alpha)
+        self.assertEqual((ident.n_refit, ident.n_refit_rejected), (1, 1))
+        ok = AdaptiveIdentifier(3.0, 1e-4, SC, SC.x(X0), SC.t(T0), data.NOISE_STD, window=400,
+                                refit_check=lambda idt, cand: True)
+        ok.learn(X0[:30], T0[:30] + 0.01, np.zeros(30, int))
+        self.assertFalse(np.array_equal(ok.krr.alpha, alpha))
+        self.assertEqual(ok.n_refit_rejected, 0)
+
+
+class _LearnRecorder(PassThrough):
+    """Identifier stand-in that records the learning flag the loop sets before each step."""
+    def __init__(self): self.learning, self.seen = True, {}
+    def step(self, x, y, u_plan=None):
+        self.seen[len(self.seen) + 2] = self.learning     # the loop calls step from sample LAG = 2 on
+        return super().step(x, y, u_plan)
+
+
+class ExcitationWindow(unittest.TestCase):
+    """TZ 14, D14. Mutations: learning window off by one; learning flag ignored; initial window from the last rows."""
+    def test_loop_sets_learning_after_a_change_only(self):
+        import mpc as m
+        n, j, N = 60, 30, 5
+        r = np.r_[np.zeros(j), np.full(n - j, 0.1)]
+        rec = _LearnRecorder()
+        ctrl = m.KMPC(m.linear_model(TH), 1e3, 1.0, u_min=-1e3, du_max=1e3)
+        cl.run_loop(cl.LinearPlant(TH), np.zeros(3), rec, ctrl, r, np.zeros(n), np.zeros(n, bool), 0.0,
+                    learn_after_change=N)
+        on = sorted(k for k, v in rec.seen.items() if v)
+        self.assertEqual(on, list(range(j + 1, j + N + 1)))
+
+    def test_identifier_adds_no_rows_while_not_learning(self):
+        ident = new_identifier()
+        z0 = np.array(ident.Z).copy()
+        ident.learning = False
+        x = X0[100]
+        ident.step(x, float(T0[100]))
+        ident.learn(X0[:5], T0[:5], np.zeros(5, int))
+        np.testing.assert_array_equal(np.array(ident.Z), z0)
+        self.assertEqual(ident.n_rows_added, 0)
+        ident.learning = True
+        ident.step(x, float(T0[100]))
+        self.assertEqual(ident.n_rows_added, 1)
+
+    def test_initial_window_spans_the_whole_record(self):
+        import run_mpc as rm
+        Z = np.arange(5000.0)[:, None] * np.ones((1, 4))
+        c = rm.initial_window_whole_record({"Z": Z, "tz": np.arange(5000.0)})
+        self.assertEqual(len(c["Z"]), pl.WINDOW)
+        self.assertEqual((c["tz"][0], c["tz"][-1]), (0.0, 4999.0))
+        self.assertTrue(np.all(np.diff(c["tz"]) > 0))
+
+    def test_n_exc_from_the_startup_time_constant(self):
+        import json
+        import run_mpc as rm
+        tau = json.loads(rm.TUNING_FILE.read_text())["fopdt"]["tau"]
+        self.assertLessEqual(abs(rm.N_EXC - 4 * tau / data.TS), 1.0)
+
+    def test_validation_scenarios(self):
+        lim = safety.tc_max()["tc_max"]
+        d1 = cl.scenario_d1(3, lim)
+        p = d1["plant"].params
+        self.assertEqual(p(99).Tf, cstr.CSTRParams().Tf)
+        self.assertEqual(abs(p(100).Tf - cstr.CSTRParams().Tf), cl.S0_TF_STEP)
+        self.assertAlmostEqual(p(1899).UA / cstr.CSTRParams().UA, cl.S0_UA_END)
+        self.assertEqual(len(d1["hold_segments"]), 10)
+        ta = cl.scenario_ta(3, lim)
+        self.assertEqual(ta["plant"].params(cl.TA_STEP - 1).Tf, cstr.CSTRParams().Tf)
+        self.assertEqual(ta["plant"].params(cl.TA_STEP).Tf, cstr.CSTRParams().Tf + cl.S0_TF_STEP)
+        s2r = cl.scenario_s2r(3, lim)
+        self.assertAlmostEqual(s2r["plant"].params(400).UA / cstr.CSTRParams().UA, 0.95)
+        self.assertEqual(s2r["plant"].params(400).Tf, cstr.CSTRParams().Tf)
+        self.assertEqual(s2r["plant"].params(600).Tf, cstr.CSTRParams().Tf + 1.0)
+
+
 class Scenarios(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
