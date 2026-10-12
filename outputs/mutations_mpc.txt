@@ -33,5 +33,11 @@ caught    learn_window_short    closed_loop.py  excitation window: one sample sh
 caught    learning_ignored      adaptive.py   excitation window: learning flag ignored
 caught    r2_last_rows          run_mpc.py    initial window from the last rows of the record
 caught    readme_number_edit    README.md     README: a number of the Part 2 table edited by hand
+caught    plan_unshifted        mpc.py        supervisor: controller's plan not shifted by one step
+caught    viol_rate_dropped     closed_loop.py  metrics: moves above du_max not counted as violations
+caught    ignition_last_T       closed_loop.py  metrics: ignition judged on the last T instead of the highest
+caught    fallback_scope_s5b    report_mpc.py  acceptance: fallback steps of S5b counted in the D11 share
+caught    viol_scope_in_set     report_mpc.py  acceptance: violations counted inside the admissible set only
+caught    grid_edge_index       run_mpc.py    tuning: lower edge of the grid not recognised
 caught    tune_ss_ignored       run_mpc.py    tuning: steady-state limit ignored in the selection
-35 of 35 caught
+41 of 41 caught

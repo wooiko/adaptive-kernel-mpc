@@ -29,6 +29,8 @@ IGNITION_T = 350.0   # K. On the cold branch T stays below it at every vertex of
                      # the limit Tc_max, and the hot steady state just above the nominal limit is far above
                      # it (both computed in tests/test_mpc.py, class IgnitionThreshold).
 BAND = 0.005         # mol/L, settling band (TZ 8)
+VIOL_TOL = 1e-9      # K: numerical tolerance of the constraint check in run_metrics (floating point, not a design value)
+AT_LIMIT_TOL = 1e-6  # K: an input this close to a limit counts as "at the limit" (share of time at the limits, TZ 8)
 SS_WINDOW = 50       # samples (5 min): steady-state error = mean over the last 5 min of a segment (TZ 8)
 SCENARIO_IDS = {"S0": 10, "S1": 11, "S2": 12, "S3": 13, "S4": 14, "S5a": 15, "S5b": 16, "S6": 17,  # >= 10 (P5)
                 "D1": 21, "Ta": 22, "S2r": 23}   # validation of D14 (validate_offset.py); D1, Ta as in the analysis
@@ -417,13 +419,13 @@ def run_metrics(log, starts, u_min, u_max, du_max, k0=LAG):
     du = np.diff(u)
     tc = log["t_ctrl_ms"][k0:]
     ti = log["t_ident_ms"][k0:]
-    tol = 1e-9
+    tol = VIOL_TOL
     return {"segments": segment_metrics(ca, r, starts, n),
             "iae_total": float(np.sum(np.abs(ca[k0:] - r[k0:])) * data.TS),
             "iae_total_on_measurement": float(np.nansum(np.abs(log["y_meas"][k0:] - r[k0:])) * data.TS),
             "tc_total_variation": float(np.sum(np.abs(du))),
-            "share_at_upper_limit": float(np.mean(np.abs(u[k0:] - u_max) < 1e-6)),
-            "share_at_lower_limit": float(np.mean(np.abs(u[k0:] - u_min) < 1e-6)),
+            "share_at_upper_limit": float(np.mean(np.abs(u[k0:] - u_max) < AT_LIMIT_TOL)),
+            "share_at_lower_limit": float(np.mean(np.abs(u[k0:] - u_min) < AT_LIMIT_TOL)),
             "max_T": float(np.nanmax(T)), "ignition": bool(np.nanmax(T) > IGNITION_T),
             "violations": int(np.sum(u > u_max + tol) + np.sum(u < u_min - tol) + np.sum(np.abs(du) > du_max + tol)),
             "fallback_steps": int(np.sum(log["fallback"][k0:])), "n_steps": int(n - k0),

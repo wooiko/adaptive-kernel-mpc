@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "outputs" / "mutations_mpc.txt"
-TIMEOUT_S = 180          # the unmutated tests take under 10 s
+TIMEOUT_S = 180          # the unmutated tests take about 16 s (2 cores, one BLAS thread)
 
 # (id, file, original, mutated, what it imitates)
 MUTATIONS = [
@@ -99,6 +99,19 @@ MUTATIONS = [
      "np.arange(len(c[\"Z\"]) - window, len(c[\"Z\"]))", "initial window from the last rows of the record"),
     ("readme_number_edit", "README.md", r"re:(\| S1, set-point steps: IAE, mol/L min \| \d+\.)(\d)",
      r"\g<1>9\g<2>", "README: a number of the Part 2 table edited by hand"),
+    ("plan_unshifted", "mpc.py", "return (blocking_matrix(n + 1, self.Nc) @ self.V)[1:]",
+     "return (blocking_matrix(n + 1, self.Nc) @ self.V)[:-1]", "supervisor: controller's plan not shifted by one step"),
+    ("viol_rate_dropped", "closed_loop.py", " + np.sum(np.abs(du) > du_max + tol))", ")",
+     "metrics: moves above du_max not counted as violations"),
+    ("ignition_last_T", "closed_loop.py", '"ignition": bool(np.nanmax(T) > IGNITION_T)',
+     '"ignition": bool(T[-1] > IGNITION_T)', "metrics: ignition judged on the last T instead of the highest"),
+    ("fallback_scope_s5b", "report_mpc.py", "        for sc in IN_SET:\n            for _, m in runs(S, sc, conf):",
+     "        for sc in SCENARIOS:\n            for _, m in runs(S, sc, conf):",
+     "acceptance: fallback steps of S5b counted in the D11 share"),
+    ("viol_scope_in_set", "report_mpc.py", 'viol = sum(m["violations"] for sc in SCENARIOS',
+     'viol = sum(m["violations"] for sc in IN_SET', "acceptance: violations counted inside the admissible set only"),
+    ("grid_edge_index", "run_mpc.py", 'return "lower edge" if on[0] == 0 else', 'return "lower edge" if on[0] == 1 else',
+     "tuning: lower edge of the grid not recognised"),
     ("tune_ss_ignored", "run_mpc.py", 'r.get("violations", 0) == 0 and r["ss_max"] <= SS_LIMIT]',
      'r.get("violations", 0) == 0]', "tuning: steady-state limit ignored in the selection"),
 ]

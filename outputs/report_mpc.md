@@ -9,7 +9,7 @@ Plant: the CSTR of part 1 (Henson & Seborg, 1997); input Tc, held over a step of
 | Setting | Value | Source |
 |---|---|---|
 | Np, Nc | 20, 5 samples | decision R4 |
-| Hard input limits | 292 K <= Tc <= 300.547 K, |dTc| <= 1 K per step | TZ 4; R2; R5 |
+| Hard input limits | 292 K <= Tc <= 300.547 K, \|dTc\| <= 1 K per step | TZ 4; R2; R5 |
 | Weights | q0 = 1/0.01^2, r0 = rho/1^2, rho = 3 | TZ 5.5; tuned on S0 |
 | Disturbance filter gain beta | 0.03 | D2; tuned on S0 |
 | PID (SIMC PI) | tau_c = 0.45 min, Kc = -121.1 K L/mol, tau_i = 1.269 min | tuned on S0 |
@@ -27,7 +27,7 @@ Decided from the result files:
 |---|---|---|
 | Violations of the hard input constraints, all runs of all controllers | 0 in 1460 runs over 20 seeds; 0 in the runs of outputs/mpc_metrics.json (seed 0, oracle included) | yes |
 | Ignition (T > 350 K) in S1, S2, S3, S4, S5a, S6, K-MPC static and K-MPC adaptive, all seeds | K-MPC static: 0 runs; K-MPC adaptive: 0 runs; highest T 330.4 K | yes |
-| S2: |steady-state error| on the true Ca <= 0.001 mol/L, both K-MPC, every seed | K-MPC static: worst 0.0008 (seed 2); K-MPC adaptive: worst 0.0053 (seed 15) | **no** |
+| S2: \|steady-state error\| on the true Ca <= 0.001 mol/L, both K-MPC, every seed | K-MPC static: worst 0.0008 (seed 2); K-MPC adaptive: worst 0.0053 (seed 15) | **no** |
 | Fallback plan in at most 0.1 % of the steps of each MPC configuration, all seeds of S1, S2, S3, S4, S5a, S6 together (TZ 14, D11) | highest 9 of 129760 steps (0.007 %, K-MPC adaptive, sign gate) | yes |
 | K-MPC step time, 95th percentile <= 60 ms, one BLAS thread | highest p95 of a run 16.0 ms (K-MPC static, S1, seed 3) | yes |
 
@@ -49,6 +49,21 @@ Decided by the tests (`python -m unittest discover -s tests`): G against central
 | K-MPC adaptive, anchored window, sign gate | 0.5258 [0.5161; 0.5365] | 0.5800 (seed 2) | 70.3 [68.6; 74.3] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | K-MPC adaptive, excitation window | 0.5173 [0.5148; 0.5255] | 0.6076 (seed 2) | 67.9 [66.6; 70.3] | 325.5 (seed 19) | 0 of 20 | 0.0 [0.0; 0.0] % |
 | NMPC on the same KRR | 0.5240 [0.5181; 0.5315] | 0.6220 (seed 8) | 67.6 [66.3; 68.7] | 325.5 (seed 2) | 0 of 20 | 0.0 [0.0; 0.0] % |
+
+Settling into the band +-0.005 mol/L (staying in it to the end of the segment) and overshoot past the new set-point, pooled over the 6 set-point steps of each seed:
+
+| Configuration | settling time, min | steps not settled | overshoot, % of the step |
+|---|---|---|---|
+| PID | 2.7 [2.3; 2.8] | 0 of 120 | 0.9 [0.3; 1.5] |
+| linear MPC (OE) | 3.1 [2.7; 3.6] | 2 of 120 | 0.0 [0.0; 0.6] |
+| K-MPC static | 2.7 [2.6; 2.8] | 0 of 120 | 4.9 [3.3; 7.4] |
+| K-MPC adaptive, no supervisor | 2.7 [2.6; 3.0] | 0 of 120 | 5.0 [3.8; 6.7] |
+| K-MPC adaptive | 2.7 [2.6; 3.0] | 0 of 120 | 5.0 [3.8; 6.7] |
+| K-MPC adaptive, anchored window | 2.7 [2.6; 2.8] | 0 of 120 | 4.6 [3.7; 6.4] |
+| K-MPC adaptive, sign gate | 2.7 [2.6; 3.0] | 0 of 120 | 5.0 [3.9; 6.7] |
+| K-MPC adaptive, anchored window, sign gate | 2.7 [2.6; 2.8] | 0 of 120 | 4.6 [3.8; 6.4] |
+| K-MPC adaptive, excitation window | 2.7 [2.6; 2.8] | 0 of 120 | 4.6 [3.3; 6.6] |
+| NMPC on the same KRR | 2.7 [2.6; 2.9] | 0 of 120 | 5.0 [3.9; 6.9] |
 
 **S2: Tf steps +1 K and -1 K, UA ramp to -5 %.** 20 seeds.
 
@@ -126,7 +141,7 @@ Seeds with |steady-state error| > 0.001 mol/L, by segment (segments that end wit
 
 Filter in real time and inputs moved by spikes (deviation of Tc from the run without spikes, same noise and gap):
 
-| Configuration | normal samples rejected | samples restored | spikes caught | steps with |dTc| > 0.1 K | largest |dTc|, K |
+| Configuration | normal samples rejected | samples restored | spikes caught | steps with \|dTc\| > 0.1 K | largest \|dTc\|, K |
 |---|---|---|---|---|---|
 | PID | 0 [0; 0] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
 | linear MPC (OE) | 0 [0; 0] | 0 [0; 0] | 100.0 [100.0; 100.0] % | - | - |
@@ -520,8 +535,8 @@ The configuration "K-MPC adaptive, excitation window" (rows enter the window onl
 
 | Criterion | Requirement | Result | Met |
 |---|---|---|---|
-| a | |error| <= 1.0 on every segment of V1-V4 | 0 values above | yes |
-| b | |mean(F - static)| <= 0.15, each |F - static| <= 0.5 | largest |mean| 0.030 (D1, segment 3); largest single 0.916 | **no** |
+| a | \|error\| <= 1.0 on every segment of V1-V4 | 0 values above | yes |
+| b | \|mean(F - static)\| <= 0.15, each \|F - static\| <= 0.5 | largest \|mean\| 0.030 (D1, segment 3); largest single 0.916 | **no** |
 | c | gamma >= 0.2 at every probe of F in V1-V4 | lowest 0.514 | yes |
 | d | V5: median IAE(F)/IAE(adaptive) <= 1.05, no violations, fallback <= 0.1 % | S1 0.996; S3 0.798; S4 0.992; S6 1.007 | yes |
 
@@ -545,7 +560,7 @@ S0 has the structure of S2 (Tf step, UA ramp, 15 min of constant disturbance aft
 
 Diagnostic by the truth (P3), seed 0, snapshots every 150 samples. Gain ratio: steady-state gain dCa/dTc of the controller's model over the true gain at the operating point; window std: standard deviation of Tc over the rows of the model's window.
 
-| Configuration | gain ratio | largest |bias|, mol/L | window std of Tc, K |
+| Configuration | gain ratio | largest \|bias\|, mol/L | window std of Tc, K |
 |---|---|---|---|
 | K-MPC static | 0.97 .. 2.07 | 0.0383 | 2.94 .. 2.94 |
 | K-MPC adaptive | 0.22 .. 1.90 | 0.0041 | 1.04 .. 2.72 |
@@ -560,11 +575,11 @@ Loss of the linearisation, S1, seed 0, 30 states of the adaptive K-MPC loop: the
 |---|---|---|
 | (J_K-MPC - J_ref) / J_ref | 3.92e-06 | 8.88e-03 |
 | (J_NMPC - J_ref) / J_ref | -2.61e-09 | -2.11e-13 |
-| |u_k K-MPC - u_k ref|, K | 9.25e-05 | 3.70e-02 |
+| \|u_k K-MPC - u_k ref\|, K | 9.25e-05 | 3.70e-02 |
 
 Ignition in S5, seed 0: the inputs of each run integrated again with LSODA (rtol 1e-08) from the same initial state with the same parameters:
 
-| Scenario | Configuration | highest T, code, K | highest T, LSODA, K | largest |T diff|, K | same verdict |
+| Scenario | Configuration | highest T, code, K | highest T, LSODA, K | largest \|T diff\|, K | same verdict |
 |---|---|---|---|---|---|
 | S5a | PID | 330.30 | 330.30 | 1.60e-05 | yes |
 | S5a | linear MPC (OE) | 330.07 | 330.07 | 1.60e-05 | yes |
@@ -582,6 +597,8 @@ Ignition in S5, seed 0: the inputs of each run integrated again with LSODA (rtol
 | S5b | K-MPC adaptive, anchored window | 484.70 | 484.70 | 1.91e-01 | yes |
 | S5b | NMPC on the same KRR | 478.46 | 478.45 | 8.69e-03 | yes |
 
+Reference run on a second machine with a comparison of the result JSON (TZ 10): not done.
+
 ## 12. Tuning and choices (P3)
 
 Rule on S0 (seed 0, own random stream 10): admissible: no violations, |steady-state error| <= 0.001 mol/L on the S0 disturbance segments; among them the lowest TV of Tc with IAE within 5% of the lowest admissible IAE. Chosen: rho = 3, beta = 0.03, tau_c = 0.45 min (FOPDT on the start-up data: K = -0.0116 mol/L/K, tau = 1.269 min, theta = 0.45 min). Sensitivity to Np on S0 (Np stays 20):
@@ -592,15 +609,18 @@ Rule on S0 (seed 0, own random stream 10): admissible: no violations, |steady-st
 | 20 | 0.3523 | 89.3 | 7.4 |
 | 40 | 0.3545 | 86.6 | 10.9 |
 
+Position of each chosen setting on its grid (the selection rule does not look at it; P9): rho = 3 on 0.3 .. 30: interior; beta = 0.03 on 0.003 .. 1: interior; tau_c = 0.45 on 0.45 .. 7.2: lower edge.
+
 | Choice | Made on | Test data used |
 |---|---|---|
 | Kernel width, regularisation, filter threshold | start-up block of each seed (part 1 procedure) | no |
 | rho, beta (all MPCs), tau_c (PID) | S0, seed 0 | no |
 | FOPDT model of the PID | start-up block, seed of the run | no |
-| Np, Nc, |dTc| limit | decisions R4, R5 | no |
+| Np, Nc, \|dTc\| limit | decisions R4, R5 | no |
 | Steady-state requirement in the tuning rule | added after S2 of seed 0 failed it at beta = 0.01 (D5); S2 itself takes no part in the selection | no (S2 seen) |
 | Anchored window, 500 of 1000 rows | a priori, added after the S3 result of seed 0 (D10) | no (S3 seen) |
 | Sign gate on the window model (D13) | S0, seeds 0-19, after the S2 result; no parameter | no (S2 seen) |
+| Excitation window (D14): rows enter the window for 50 samples after a set-point change; initial window evenly over the whole start-up record | a priori (D14): 4 time constants of the start-up FOPDT model, rounded (tau = 1.269 min; 50 samples = 3.94 tau); from the independent analysis after the S2 result; validated once on seeds 20-39, criteria fixed before the run | no (S2 seen) |
 | S3 diagnostic | true Ca, k0 and gains | diagnostic by the truth |
 
 ## 13. Thresholds and their sources (P11)
@@ -622,6 +642,12 @@ Rule on S0 (seed 0, own random stream 10): admissible: no violations, |steady-st
 | Process change | 4 rejections in a row | part 1 (adaptive.N_JUMP) |
 | S1 edge set-point | Ca at Tc_max - 0.25 K | closed_loop.S1_BELOW_LIMIT (scenario design) |
 | Anchored rows | 500 of 1000 | D10, a priori |
+| Sign gate | steady-state gain dCa/dTc of a refit < 0 | D13: sign of the true gain on the cold branch (tests: GainSign) |
+| Excitation window | 50 samples after a set-point change | D14: 4 time constants of the start-up FOPDT model, a priori |
+| Solver result accepted | bound violation <= 1e-06 K, status 'solved' | mpc.FEAS_TOL: numerical tolerance (the result is then clipped to the bounds); TZ 5.6 |
+| Constraint check | violation > 1e-09 K | closed_loop.VIOL_TOL: numerical tolerance |
+| Input at a limit | within 1e-06 K | closed_loop.AT_LIMIT_TOL: numerical tolerance |
+| Input moved by spikes (S4 table) | \|dTc\| > 0.1 K | run_mpc.S4_MOVE_K: reporting threshold without a computed source; no criterion uses it |
 
 ## 14. Basis in the thesis (D12)
 

@@ -152,7 +152,7 @@ hard limits on Tc (box + rate) in every controller; fallback: shifted plan, clip
 - S3 (drift): adaptive K-MPC has a lower IAE than static K-MPC on 0 of 20 seeds (median ratio 1.247). The configuration with an anchored window (500 of 1000 start-up rows kept) was added after the S3 result of seed 0; its row count was set without tuning.
 - Outside the admissible set (S5b: UA -10 %, Caf +5 %) the reactor ignites: PID 20 of 20, linear MPC (OE) 15 of 20, K-MPC static 20 of 20, K-MPC adaptive, no supervisor 20 of 20, K-MPC adaptive 20 of 20, K-MPC adaptive, anchored window 20 of 20, K-MPC adaptive, sign gate 20 of 20, K-MPC adaptive, anchored window, sign gate 20 of 20, K-MPC adaptive, excitation window 20 of 20, NMPC on the same KRR 20 of 20.
 
-**Limitations.** The adaptive K-MPC does not meet the zero steady-state error requirement in S2 on every seed (above). Simulation of a textbook process. Protection holds only inside the admissible set named above. No stability guarantee: the results are empirical, for these scenarios and seeds. T is not measured. Step times are for the machine in the report.
+**Limitations.** The adaptive K-MPC does not meet the zero steady-state error requirement in S2 on every seed (above). Simulation of a textbook process. Protection holds only inside the admissible set named above. No stability guarantee: the results are empirical, for these scenarios and seeds. T is not measured. Sensor noise 0.002 mol/L with 2 % spikes, as simulated; other noise not tested. Step times are for the machine in the report.
 
 **Basis.** Part 2 is a separate study on this reactor. From the PhD thesis (see Background) it takes: a kernel (KRR) model of the process, linearised at every step so that control reduces to a convex QP (K-MPC); the three-level architecture on one kernel: SVR filter, KRR on a sliding window, GP supervisor; the supervisor raises the penalty on input moves when the planned trajectory leaves the data; compensation of an unmeasured disturbance through the prediction error. Everything else is designed and tuned for this process.
 
@@ -161,6 +161,11 @@ hard limits on Tc (box + rate) in every controller; fallback: shifted plan, clip
     python run_mpc.py --tune      # S0: rho, beta, PID (outputs/mpc_tuning.json; already frozen)
     python run_mpc.py             # seed 0, all controllers incl. the oracle, figures
     python run_mpc_seeds.py       # 20 seeds (outputs/mpc_seeds.json), several hours on 2 cores
+    python diagnose_mpc.py        # S3 diagnostic by the truth (outputs/mpc_diag_s3.json)
+    python diagnose_offset.py     # S0 offset diagnostic (outputs/mpc_diag_offset.json)
+    python diagnose_offset.py "K-MPC adaptive, sign gate;K-MPC adaptive, anchored window, sign gate" mpc_diag_offset_gate.json
+    python validate_offset.py     # one-time D14 validation on new seeds (outputs/mpc_validation.json)
+    python check_mpc_independent.py   # independent calculations (outputs/mpc_independent.json)
     python report_mpc.py          # outputs/report_mpc.md, fig6_seeds.png, this section
     python tests/mutate_mpc.py    # mutation check of the part 2 tests
 

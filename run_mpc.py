@@ -45,9 +45,12 @@ SS_LIMIT = 0.001                          # mol/L: candidates must also meet the
 
 N_EXC = 50                                # D14: rows enter the window only for N_EXC samples after a set-point
                                           # change: 4 time constants of the start-up FOPDT model (tau = 1.269 min,
-                                          # outputs/mpc_tuning.json: 50.8 samples), rounded to 50; set a priori
+                                          # outputs/mpc_tuning.json: 50.7 samples), rounded to 50; set a priori
 ANCHOR = 500                              # anchored window (TZ 14, D10): the oldest 500 of the 1000 rows of the
                                           # initial window stay in it; set a priori, not tuned (P3)
+S4_MOVE_K = 0.1                           # K: S4 report only, a step counts as "moved by spikes" if its input differs
+                                          # from the run without spikes by more than this; a reporting threshold
+                                          # without a computed source; no decision or criterion depends on it (P11)
 
 # name: (controller kind, identifier adapts (else frozen at commissioning), supervisor multiplier used)
 CONFIGS = {
@@ -168,10 +171,29 @@ def s4_moves(results, logs):
             continue
         du = np.abs(np.asarray(lg["u"]) - np.asarray(ref["u"]))[cl.LAG:]
         results["S4"][name]["u_dev_from_no_spike_run"] = {"sum_K": float(du.sum()), "max_K": float(du.max()),
-                                                          "samples_over_0.1K": int(np.sum(du > 0.1))}
+                                                          f"samples_over_{S4_MOVE_K}K": int(np.sum(du > S4_MOVE_K))}
 
 
 # ---------------------------------------------------------------- tuning on S0
+
+def grid_position(value, grid, tol=1e-9):
+    """Where a chosen setting lies on its tuning grid (P9): "lower edge", "upper edge" or "interior".
+    ValueError if the value is not on the grid (relative tolerance tol)."""
+    g = sorted(float(x) for x in grid)
+    on = [i for i, x in enumerate(g) if abs(x - value) <= tol * max(abs(x), 1.0)]
+    if not on:
+        raise ValueError(f"{value} is not on the grid {g}")
+    return "lower edge" if on[0] == 0 else ("upper edge" if on[0] == len(g) - 1 else "interior")
+
+
+def chosen_grid_positions(T):
+    """Grid position of each setting chosen on S0 (outputs/mpc_tuning.json), from the grids stored in the file:
+    {name: (value, lowest, highest, position)}. The selection rule itself (D5) does not look at it."""
+    ch = T["chosen"]
+    grids = {"rho": ([r["rho"] for r in T["mpc_grid"]], ch["rho"]),
+             "beta": ([r["beta"] for r in T["mpc_grid"]], ch["beta"]),
+             "tau_c": ([r["tau_c"] for r in T["pid_grid"]], ch["pid"]["tau_c"])}
+    return {k: (v, min(g), max(g), grid_position(v, g)) for k, (g, v) in grids.items()}
 
 def select(rows):
     """Admissible: no violations and steady-state error within SS_LIMIT on the S0 disturbance segments.
