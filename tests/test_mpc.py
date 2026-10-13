@@ -561,6 +561,18 @@ class Metrics(unittest.TestCase):
             log["T"] = np.r_[330.0, 331.0, tmax, 332.0, 333.0]
             self.assertEqual(cl.run_metrics(log, [2], 292.0, 300.0, 1.0)["ignition"], ign)
 
+    def test_full_step_time(self):
+        """D15: the step of the controller is the whole sample, identifier + controller, timed on the same sample.
+        Mutation: full_ms without the identifier."""
+        log = {"Ca": np.zeros(6), "r": np.zeros(6), "u": np.full(6, 295.0), "y_meas": np.zeros(6), "T": np.full(6, 330.0),
+               "fallback": np.zeros(6, bool), "status": ["solved"] * 6, "regime": np.zeros(6, int),
+               "flagged_rt": np.zeros(6, bool), "t_ctrl_ms": np.r_[np.nan, np.nan, 1.0, 2.0, 3.0, 4.0],
+               "t_ident_ms": np.r_[np.nan, np.nan, 40.0, 1.0, 1.0, 1.0]}
+        m = cl.run_metrics(log, [2], 292.0, 300.0, 1.0)
+        self.assertEqual(m["full_ms"]["max"], 41.0)
+        self.assertEqual(m["step_ms"]["max"], 4.0)
+        self.assertEqual(m["full_ms"]["median"], float(np.median([41.0, 3.0, 4.0, 5.0])))
+
     def test_violations(self):
         """Mutation: moves above du_max not counted. Box above, box below and one too large move are each counted once;
         values exactly on the limits are not violations."""
@@ -619,7 +631,8 @@ class _VRecorder:
 
 def _metrics_stub(**kw):
     return {"violations": 0, "ignition": False, "max_T": 330.0, "ss_error_max_abs_hold": 0.0005, "fallback_steps": 0,
-            "n_steps": 1000, "step_ms": {"median": 1.0, "p95": 2.0, "max": 3.0}, **kw}
+            "n_steps": 1000, "step_ms": {"median": 1.0, "p95": 2.0, "max": 3.0},
+            "full_ms": {"median": 5.0, "p95": 9.0, "max": 20.0}, **kw}
 
 
 class ReportAcceptance(unittest.TestCase):
@@ -648,8 +661,21 @@ class ReportAcceptance(unittest.TestCase):
         self.assertFalse(self.verdict({("S4", "K-MPC static"): {"ignition": True}})["ignition"])
         self.assertFalse(self.verdict({("S5b", "PID"): {"violations": 1}})["violations"])   # every run counts
         self.assertFalse(self.verdict({("S2", "K-MPC adaptive"): {"ss_error_max_abs_hold": 0.0011}})["s2"])
-        self.assertFalse(self.verdict({("S5b", "K-MPC static"): {"step_ms": {"median": 1.0, "p95": 61.0,
-                                                                             "max": 70.0}}})["step_time"])
+        slow = {"median": 30.0, "p95": 61.0, "max": 70.0}
+        self.assertFalse(self.verdict({("S3", "K-MPC adaptive"): {"full_ms": slow}})["step_time"])   # whole sample (D15)
+        self.assertTrue(self.verdict({("S5b", "K-MPC adaptive"): {"full_ms": slow}})["step_time"])   # outside the set
+        self.assertTrue(self.verdict({("S3", "NMPC on the same KRR"): {"full_ms": slow}})["step_time"])   # not a K-MPC
+
+    def test_ties_within_tolerance(self):
+        """Audit 1, C3: values that differ by solver noise count as equal. Mutation: exact equality."""
+        import report_mpc as rp
+        A = np.array([1.0, 1.0, 1.0, 2.0])
+        B = np.array([1.0 + 2e-7, 1.0 - 5e-7, 1.001, 1.0])
+        np.testing.assert_array_equal(rp.ties(A, B), [True, True, False, False])
+        S = {"by_seed": {str(i): {"results": {"S1": {"a": {"iae_total": a}, "b": {"iae_total": b}}}}
+                         for i, (a, b) in enumerate(zip(A, B))}}
+        self.assertEqual(rp.pair_stats(S, "a", "b", "S1"), {"n": 4, "a_better": 1, "ties": 2,
+                                                            "ratio_median": float(np.median(A / B))})
 
     def test_table_cells_keep_their_pipes(self):
         """A '|' inside a cell (|dTc|) is escaped: every row of the table has as many cell separators as the header."""
@@ -938,7 +964,7 @@ class Part1Unchanged(unittest.TestCase):
             self.assertEqual(hashlib.sha256(part1_normalised(name, (OUT / name).read_bytes())).hexdigest(), ref, name)
 
 
-_TIME_KEYS = ("step_ms", "ident_ms", "wall_s", "wall_s_total")
+_TIME_KEYS = ("step_ms", "ident_ms", "full_ms", "wall_s", "wall_s_total")
 
 
 def _no_time(o):
@@ -1160,3 +1186,42 @@ class Scenarios(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Provenance(unittest.TestCase):
+    """Audit 1, C1: the code fingerprint follows every run file and the frozen settings, not line endings.
+    Mutation: settings left out of the fingerprint."""
+    def test_fingerprint(self):
+        import shutil
+        import tempfile
+        import run_mpc as rm
+        root = Path(rm.__file__).parent
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "outputs").mkdir()
+            for f in rm.RUN_FILES:
+                shutil.copy2(root / f, d / f)
+            shutil.copy2(root / "outputs" / "mpc_tuning.json", d / "outputs" / "mpc_tuning.json")
+            ref = rm.code_fingerprint(d)
+            self.assertEqual(ref, rm.code_fingerprint(root))
+            (d / "mpc.py").write_bytes((root / "mpc.py").read_bytes().replace(b"\n", b"\r\n"))
+            self.assertEqual(rm.code_fingerprint(d), ref)                  # line endings do not count
+            (d / "mpc.py").write_text((root / "mpc.py").read_text() + "\n# changed\n")
+            self.assertNotEqual(rm.code_fingerprint(d), ref)
+            shutil.copy2(root / "mpc.py", d / "mpc.py")
+            T = json.loads((d / "outputs" / "mpc_tuning.json").read_text())
+            T["chosen"]["rho"] += 1.0
+            (d / "outputs" / "mpc_tuning.json").write_text(json.dumps(T))
+            self.assertNotEqual(rm.code_fingerprint(d), ref)
+
+
+class OffsetDiagnostic(unittest.TestCase):
+    """Audit 1, N3: a local model without a steady state (1 - a1 - a2 <= 0) has no gain; such probes are not counted as
+    a wrong sign. Mutation: the denominator not checked."""
+    def test_no_steady_state_is_not_a_wrong_sign(self):
+        import diagnose_offset as do
+        self.assertTrue(np.isnan(do.ss_gain([0.9, 0.3, -0.01, -0.005])))
+        self.assertAlmostEqual(do.ss_gain([0.6, 0.2, -0.01, -0.005]), -0.015 / 0.2, places=12)
+        rows = np.array([[10, -0.01, -0.02, 1.0], [20, np.nan, -0.02, 1.0], [30, 0.01, -0.02, 1.0],
+                         [40, -0.02, -0.02, 1.0]])
+        self.assertAlmostEqual(do.wrong_share(rows), 1 / 3, places=12)

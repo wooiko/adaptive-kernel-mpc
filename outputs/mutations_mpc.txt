@@ -39,5 +39,11 @@ caught    ignition_last_T       closed_loop.py  metrics: ignition judged on the 
 caught    fallback_scope_s5b    report_mpc.py  acceptance: fallback steps of S5b counted in the D11 share
 caught    viol_scope_in_set     report_mpc.py  acceptance: violations counted inside the admissible set only
 caught    grid_edge_index       run_mpc.py    tuning: lower edge of the grid not recognised
+caught    full_ms_ctrl_only     closed_loop.py  step time: the whole sample without the identifier (D15)
+caught    step_criterion_qp     report_mpc.py  acceptance: step time of the controller part only (D15)
+caught    step_criterion_all    report_mpc.py  acceptance: step time limit applied to S5b too (D15)
+caught    tie_exact             report_mpc.py  pairs: ties by exact equality (audit 1, C3)
+caught    fingerprint_no_settings  run_mpc.py    provenance: frozen settings left out of the code fingerprint (audit 1, C1)
+caught    diag_den_ignored      diagnose_offset.py  S0 diagnostic: gain without the check of 1 - a1 - a2 (audit 1, N3)
 caught    tune_ss_ignored       run_mpc.py    tuning: steady-state limit ignored in the selection
-41 of 41 caught
+47 of 47 caught

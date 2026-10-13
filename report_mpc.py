@@ -38,6 +38,9 @@ KMPC_CRIT = ("K-MPC static", "K-MPC adaptive")       # "both K-MPC" of TZ 9
 FALLBACK_LIMIT = 0.001                              # share of steps (TZ 9; counted as decided in TZ 14, D11)
 STEP_LIMIT_MS = 60.0                                # p95 of one controller step (TZ 4: 1 % of Ts)
 SS_LIMIT = rm.SS_LIMIT                              # mol/L, S2 steady-state error (TZ 9)
+TIE_TOL = 1e-6                                      # relative: two values closer than this count as equal (audit 1,
+                                                    # C3: with m_k = 1 the asymmetric and symmetric QP differ by solver
+                                                    # noise only, up to 2.1e-7 of IAE, solved inaccurate step included)
 def scenario_text(lim):
     """One-line description of each scenario, from the scenario definitions (closed_loop.py)."""
     pe = lambda name, k=-1: cl.SCENARIOS[name](0, lim)["plant"].params(   # noqa: E731
@@ -59,7 +62,9 @@ def scenario_text(lim):
 PAIRS = [  # (A, B, the factor the pair separates; TZ 7)
     ("K-MPC static", "linear MPC (OE)", "nonlinear model (KRR vs OE), both frozen"),
     ("K-MPC adaptive", "K-MPC static", "adaptation of the model"),
-    ("K-MPC adaptive", "NMPC on the same KRR", "linearisation (same model, QP vs SLSQP)"),
+    ("K-MPC adaptive", "NMPC on the same KRR", "linearisation (QP vs SLSQP; each run has its own identifier, so the "
+                                               "windows differ after the first different input; same states: section "
+                                               "Independent calculations)"),
     ("K-MPC adaptive", "K-MPC adaptive, no supervisor", "supervisor"),
     ("K-MPC adaptive, anchored window", "K-MPC adaptive", "anchored window (D10)"),
     ("K-MPC adaptive, sign gate", "K-MPC adaptive", "sign gate (D13)"),
@@ -170,10 +175,11 @@ def criteria(S, R0):
     out.append({"id": "fallback", "text": f"Fallback plan in at most {100 * FALLBACK_LIMIT:.1f} % of the steps of each MPC "
                                          f"configuration, all seeds of {', '.join(IN_SET)} together (TZ 14, D11)",
                 "value": "highest " + max(fb, key=lambda r: r["share"])["text"], "pass": not bad})
-    st = step_table(S)
+    st = step_table(S, IN_SET, "full_ms")
     km = [r for r in st if r["conf"].startswith("K-MPC")]
     w = max(km, key=lambda r: r["p95_max"])
-    out.append({"id": "step_time", "text": f"K-MPC step time, 95th percentile <= {STEP_LIMIT_MS:.0f} ms, one BLAS thread",
+    out.append({"id": "step_time", "text": f"K-MPC step time (identifier + controller, one sample), 95th percentile <= "
+                                          f"{STEP_LIMIT_MS:.0f} ms, one BLAS thread, {', '.join(IN_SET)} (TZ 14, D15)",
                 "value": f"highest p95 of a run {w['p95_max']:.1f} ms ({w['conf']}, {w['where']})",
                 "pass": all(r["p95_max"] <= STEP_LIMIT_MS for r in km)})
     return out
@@ -211,18 +217,26 @@ def fallback_cases(S, R0):
     return cases
 
 
-def step_table(S):
+def step_table(S, scens=SCENARIOS, key="full_ms"):
+    """Time per sample over the runs of each configuration in `scens`. key: "full_ms" (identifier + controller, the
+    step of TZ 4 by D15), "step_ms" (controller only: QP and its preparation) or "ident_ms" (identifier only)."""
     rows = []
     for conf in rm.CONFIGS:
-        allr = [(sc, s, m) for sc in SCENARIOS for s, m in runs(S, sc, conf)]
+        allr = [(sc, s, m) for sc in scens for s, m in runs(S, sc, conf)]
         if not allr:
             continue
-        sc_w, s_w, m_w = max(allr, key=lambda t: t[2]["step_ms"]["p95"])
-        rows.append({"conf": conf, "median": float(np.median([m["step_ms"]["median"] for *_, m in allr])),
-                     "p95_med": float(np.median([m["step_ms"]["p95"] for *_, m in allr])),
-                     "p95_max": m_w["step_ms"]["p95"], "where": f"{sc_w}, seed {s_w}",
-                     "max": max(m["step_ms"]["max"] for *_, m in allr), "runs": len(allr)})
+        sc_w, s_w, m_w = max(allr, key=lambda t: t[2][key]["p95"])
+        rows.append({"conf": conf, "median": float(np.median([m[key]["median"] for *_, m in allr])),
+                     "p95_med": float(np.median([m[key]["p95"] for *_, m in allr])),
+                     "p95_max": m_w[key]["p95"], "where": f"{sc_w}, seed {s_w}",
+                     "max": max(m[key]["max"] for *_, m in allr), "runs": len(allr)})
     return rows
+
+
+def ties(A, B, tol=TIE_TOL):
+    """Equal within the relative tolerance TIE_TOL (audit 1, C3: differences of the solver's numerical noise)."""
+    A, B = np.asarray(A, float), np.asarray(B, float)
+    return np.abs(A - B) <= tol * np.maximum(np.abs(A), np.abs(B))
 
 
 def pair_stats(S, a, b, scen, key=IAE):
@@ -233,7 +247,8 @@ def pair_stats(S, a, b, scen, key=IAE):
         return None
     A = np.array([va[list(sa).index(s)] for s in common])
     B = np.array([vb[list(sb).index(s)] for s in common])
-    return {"n": len(common), "a_better": int(np.sum(A < B)), "ties": int(np.sum(A == B)),
+    eq = ties(A, B)
+    return {"n": len(common), "a_better": int(np.sum((A < B) & ~eq)), "ties": int(np.sum(eq)),
             "ratio_median": float(np.median(A / B))}
 
 
@@ -266,10 +281,11 @@ def write_report(S, R0, T, diag, ind):
     tcm = S["tc_max"]
     L = []
     L.append("# Part 2: K-MPC in closed loop, validation report\n")
-    L.append(f"Generated by `report_mpc.py` from `outputs/mpc_seeds.json` (seeds {min(seeds(S))}-{max(seeds(S))}), "
-             f"`outputs/mpc_metrics.json` (seed {R0['seed']}, with the oracle), `outputs/mpc_tuning.json`, "
-             "`outputs/mpc_diag_s3.json`" + (" and `outputs/mpc_independent.json`" if ind else "")
-             + ". Every number below is computed from these files. Metrics are on the true Ca of the simulator. "
+    srcs = [f"`outputs/mpc_seeds.json` (seeds {min(seeds(S))}-{max(seeds(S))})",
+            f"`outputs/mpc_metrics.json` (seed {R0['seed']}, with the oracle)", "`outputs/mpc_tuning.json`",
+            "`outputs/mpc_diag_s3.json`"] + [f"`outputs/{f.name}`" for f in optional_sources()]
+    L.append(f"Generated by `report_mpc.py` from {', '.join(srcs[:-1])} and {srcs[-1]}. "
+             "Every number below is computed from these files. Metrics are on the true Ca of the simulator. "
              "Spread: median [25th; 75th percentile] over seeds; the worst seed is named. Part 1 "
              "(`outputs/report.md`) is unchanged.\n")
     sec = Sections(L)
@@ -291,6 +307,7 @@ def write_report(S, R0, T, diag, ind):
                     f"{S['machine']['blas_threads']} BLAS thread per run, {S['machine']['workers']} runs in parallel",
          "run_mpc_seeds.py"],
     ]) + "\n")
+    L.append(provenance_text(S, R0) + "\n")
     L.append(f"Ignition limit: Tc_max = {tcm['tc_max']:.3f} K = lowest saddle-node point over the vertices of the "
              f"admissible set (UA {100 * (safety.UA_RANGE[0] - 1):.0f}..0 %, Tf {safety.TF_RANGE[0]:+.0f}..{safety.TF_RANGE[1]:+.0f} K), "
              f"{tcm['worst_limit']:.3f} K at the vertex UA {100 * (tcm['worst_vertex']['UA'] / P0.UA - 1):+.0f} %, "
@@ -316,6 +333,9 @@ def write_report(S, R0, T, diag, ind):
         L.extend(scenario_notes(S, scen))
     L.append("\"Supervisor not normal\": share of steps with the supervisor in the cautious or conservative regime, "
              "configurations that use its multiplier.\n")
+    L.append(f"Rows added to the window by \"{EXC}\" (D14: only during {rm.N_EXC} samples after a set-point change). "
+             "Where it adds none, its model is the KRR of the start-up record and is not adapted:\n")
+    L.append(md_table(["Scenario", "rows added", "seeds with no row added"], exc_rows(S)) + "\n")
 
     sec.h("Pairwise comparisons on the same seeds")
     L.append("Each pair separates one factor (TZ 7). \"A lower\": seeds on which A has the lower IAE (ties apart); "
@@ -349,12 +369,19 @@ def write_report(S, R0, T, diag, ind):
         L.append("No run applied the fallback plan.\n")
 
     sec.h("Step time")
-    L.append(f"One BLAS thread per run, {S['machine']['workers']} runs in parallel on the machine named above. Over all "
-             "runs of a configuration: median of the run medians, median and highest of the run 95th percentiles, "
-             "highest single step.\n")
-    L.append(md_table(["Configuration", "runs", "median, ms", "p95 median, ms", "p95 highest, ms", "where", "max, ms"],
-                      [[r["conf"], r["runs"], f"{r['median']:.1f}", f"{r['p95_med']:.1f}", f"{r['p95_max']:.1f}",
-                        r["where"], f"{r['max']:.1f}"] for r in step_table(S)]) + "\n")
+    L.append(f"One BLAS thread per run, {S['machine']['workers']} runs in parallel on the machine named above. The step "
+             "of the controller (TZ 4, D15) is the whole sample: identifier (filter, window, refit, GP variance along "
+             "the plan) plus controller (linearisation, QP or SLSQP). Over the runs of a configuration: median of the "
+             "run medians, median and highest of the run 95th percentiles, highest single sample.\n")
+    head = ["Configuration", "runs", "median, ms", "p95 median, ms", "p95 highest, ms", "where", "max, ms"]
+    fmt = lambda tab: [[r["conf"], r["runs"], f"{r['median']:.1f}", f"{r['p95_med']:.1f}", f"{r['p95_max']:.1f}",   # noqa: E731
+                        r["where"], f"{r['max']:.1f}"] for r in tab]
+    L.append(f"Whole sample, inside the set ({', '.join(IN_SET)}; the acceptance check):\n")
+    L.append(md_table(head, fmt(step_table(S, IN_SET, "full_ms"))) + "\n")
+    L.append("Whole sample, S5b (outside the set, no limit):\n")
+    L.append(md_table(head, fmt(step_table(S, ("S5b",), "full_ms"))) + "\n")
+    L.append("Controller part only (linearisation and QP or SLSQP, without the identifier), all scenarios:\n")
+    L.append(md_table(head, fmt(step_table(S, SCENARIOS, "step_ms"))) + "\n")
     L.append("![step time](fig6_step_time.png)\n")
 
     sec.h(f"Reference seed {R0['seed']}: oracle NMPC on the true model")
@@ -461,6 +488,20 @@ def step_response_rows(S, scen):
     return rows
 
 
+EXC = "K-MPC adaptive, excitation window"
+
+
+def exc_rows(S):
+    """Audit 1, C4: rows added by the excitation-window configuration, per scenario."""
+    out = []
+    for scen in SCENARIOS:
+        sd, v = values(S, scen, EXC, lambda m: m.get("rows_added"))
+        if len(v):
+            out.append([scen, f"{spread(v, 0)} (range {np.nanmin(v):.0f} .. {np.nanmax(v):.0f})",
+                        f"{int(np.sum(v == 0))} of {len(v)}"])
+    return out
+
+
 def scenario_notes(S, scen):
     out = []
     if scen == "S1":
@@ -501,16 +542,22 @@ def scenario_notes(S, scen):
             mx = [m["u_dev_from_no_spike_run"]["max_K"] for _, m in rr if "u_dev_from_no_spike_run" in m]
             rows.append([c, spread(fr, 0), spread(rs, 0), spread(100 * np.array(cau), 1) + " %" if cau else "-",
                          spread(mv, 0) if mv else "-", spread(mx, 3) if mx else "-"])
-        out.append("Filter in real time and inputs moved by spikes (deviation of Tc from the run without spikes, same "
-                   "noise and gap):\n")
+        out.append("Filter in real time, and the input trajectory against the run without spikes (same noise and gap): "
+                   "steps where Tc differs from that run by more than the threshold, and the largest difference. The "
+                   "two trajectories diverge also through rejected samples, which are replaced by the model's prediction "
+                   "and kept out of the window: the difference is not only moves caused by spikes that reached the "
+                   "controller.\n")
         out.append(md_table(["Configuration", "normal samples rejected", "samples restored", "spikes caught",
-                             f"steps with |dTc| > {rm.S4_MOVE_K} K", "largest |dTc|, K"], rows) + "\n")
+                             f"steps with |Tc - Tc without spikes| > {rm.S4_MOVE_K} K",
+                             "largest |Tc - Tc without spikes|, K"], rows) + "\n")
     if scen == "S5a":
         p = pair_stats(S, "K-MPC adaptive", "K-MPC adaptive, symmetric penalty", scen)
-        sd, a = values(S, scen, "K-MPC adaptive", IAE)
-        _, b = values(S, scen, "K-MPC adaptive, symmetric penalty", IAE)
-        out.append(f"Asymmetric vs symmetric supervisor penalty: IAE equal on {int(np.sum(a == b))} of {len(a)} seeds; "
-                   f"the asymmetric one lower on {p['a_better']}.\n")
+        sd, sup = values(S, scen, "K-MPC adaptive", lambda m: m["share_not_normal"])
+        on = [int(x) for x, v in zip(sd, sup) if v > 0]
+        out.append(f"Asymmetric vs symmetric supervisor penalty: the supervisor left its normal regime (m_k > 1) on "
+                   f"{len(on)} of {len(sd)} seeds ({', '.join(map(str, on)) or 'none'}); elsewhere the two QPs are the "
+                   f"same problem. IAE equal within a relative {TIE_TOL:g} on {p['ties']} of {p['n']} seeds; the "
+                   f"asymmetric one lower on {p['a_better']}, higher on {p['n'] - p['ties'] - p['a_better']}.\n")
     if scen == "S6":
         rows = []
         for c in configs(S, scen):
@@ -525,6 +572,28 @@ def scenario_notes(S, scen):
         out.append(md_table(["Configuration", "at Tc_max", "at Tc_min", "settling after return", "not settled"], rows)
                    + "\n")
     return out
+
+
+def optional_sources():
+    """Result files besides the four always read, present in outputs/ (rule: the header names every source; N8)."""
+    names = ("mpc_independent.json", "mpc_diag_offset.json", "mpc_diag_offset_gate.json", "mpc_validation.json",
+             "mpc_validation_repeat.json", SECOND_MACHINE.name)
+    return [OUT / n for n in names if (OUT / n).exists()]
+
+
+def provenance_text(S, R0):
+    """Audit 1, C1: code fingerprint and commit of the result files, and how many runs came from a cache."""
+    out = []
+    for name, d in (("mpc_seeds.json", S), ("mpc_metrics.json", R0)):
+        pv = d.get("provenance")
+        if not pv:
+            out.append(f"{name}: provenance not recorded")
+            continue
+        g = pv.get("git") or {}
+        out.append(f"{name}: code fingerprint {pv['code_sha256_16']} (run_mpc.code_fingerprint), commit "
+                   f"{str(g.get('commit', 'unknown'))[:7]}{' with modified run files' if g.get('run_files_modified') else ''}"
+                   f", {pv['runs_computed']} runs computed, {pv['runs_from_cache']} from a cache")
+    return "Provenance: " + "; ".join(out) + "."
 
 
 def load_validation():
@@ -605,6 +674,11 @@ def validation_text(v):
     if rr:
         rep_txt = (f" Repetition of {rr['set']} on seeds {min(rr['seeds'])}-{max(rr['seeds'])}: "
                    + ("criteria a-c met." if rr["passed"] else "criteria a-c not met."))
+    fr = [r["rows_added"] for r in rows if r["config"] == vo.FIXED and r["scenario"] in
+          [sc for st, scs in vo.SETS.items() if st != "V5" for sc in scs]]
+    out.append(f"Rows added to the window by {vo.FIXED} in V1-V4 (constant set-point): {sum(x == 0 for x in fr)} of "
+               f"{len(fr)} runs added none (largest {max(fr)}); there it is the model of the start-up record, not "
+               "adapted. Rows are added only in V5 (criterion d).\n")
     fd = failed_detail(v)
     if fd:
         out.append("Criteria not met: " + "; ".join(fd) + ".\n")
@@ -622,8 +696,9 @@ def offset_text(diags):
     out = [f"S0 has the structure of S2 (Tf step, UA ramp, {' and '.join(f'{h:.0f}' for h in hold)} min of constant "
            "disturbance after each) and is not a test "
            f"scenario. Every {pe} samples the steady-state gain dCa/dTc of the controller's model at the current point "
-           "is compared with the true one. \"Wrong sign\": share of these probes where the two signs differ, over the "
-           "whole run.\n"]
+           "is compared with the true one. \"Wrong sign\": share of the probes where the local model has a steady state "
+           "(1 - a1 - a2 > 0) and the two signs differ; \"no steady state\": share of the probes where it has none, "
+           "over the whole run.\n"]
     rows = []
     for c in dict.fromkeys(r["config"] for r in runs):
         rr = [r for r in runs if r["config"] == c]
@@ -631,17 +706,20 @@ def offset_text(diags):
         rej = [100 * r["refits_rejected"] / r["refits"] for r in rr if r.get("refits")]
         rows.append([c, f"{int(np.sum(ssv <= SS_LIMIT))} of {len(rr)}", f"{ssv.max():.4f}",
                      spread(100 * np.array([r["wrong_sign_share_all"] for r in rr]), 1) + " %",
+                     (spread(100 * np.array([r["no_steady_state_share_all"] for r in rr]), 1) + " %")
+                     if all("no_steady_state_share_all" in r for r in rr) else "-",
                      spread(rej, 1) + " %" if rej else "-",
                      spread([r["iae_total"] for r in rr]) if all("iae_total" in r for r in rr) else "-"])
     out.append(md_table(["Configuration", f"seeds with offset <= {SS_LIMIT}", "worst, mol/L", "wrong sign",
-                         "refits rejected", "IAE, mol/L min"], rows) + "\n")
+                         "no steady state", "refits rejected", "IAE, mol/L min"], rows) + "\n")
     return out
 
 
 def s3_diag_text(diag):
     out = [f"Diagnostic by the truth (P3), seed {diag['seed']}, snapshots every {diag['every']} samples. Gain ratio: "
            "steady-state gain dCa/dTc of the controller's model over the true gain at the operating point; window "
-           "std: standard deviation of Tc over the rows of the model's window.\n"]
+           "std: standard deviation of Tc over the rows the model was fitted on (the identifier's window; for the "
+           "static model all start-up rows).\n"]
     rows = []
     for c, r in diag["results"].items():
         sn = r["snapshots"]
@@ -692,15 +770,19 @@ def thresholds(st, tcm):
         ["Steady-state window", f"{cl.SS_WINDOW * data.TS:.0f} min", "TZ 8"],
         ["S2 steady-state error", f"{SS_LIMIT} mol/L", f"TZ 9: half the noise std {data.NOISE_STD}"],
         ["Fallback share", f"{100 * FALLBACK_LIMIT:.1f} %", "TZ 9, counted as in D11"],
-        ["Step time", f"{STEP_LIMIT_MS:.0f} ms (p95)", "TZ 4: 1 % of the sampling period"],
+        ["Step time", f"{STEP_LIMIT_MS:.0f} ms (p95 of identifier + controller per sample, {', '.join(IN_SET)})",
+         "TZ 4: 1 % of the sampling period; what is timed and where: D15"],
+        ["Equal results in a pair", f"relative difference <= {TIE_TOL:g}", "audit 1, C3: above the solver noise of two "
+                                                                          "identical QPs (2.1e-7)"],
         ["Tuning tolerance", f"{100 * rm.TUNE_TOL:.0f} % of the best IAE", "D5"],
         ["Supervisor regimes", "th1 = lam, th2 = 3 lam", "part 1 (adaptive.Supervisor)"],
         ["Filter threshold", f"calibrated to reject {100 * pl.ALPHA:.1f} % of normal samples", "part 1 (start-up data)"],
         ["Process change", f"{N_JUMP} rejections in a row", "part 1 (adaptive.N_JUMP)"],
         ["S1 edge set-point", f"Ca at Tc_max - {cl.S1_BELOW_LIMIT} K", "closed_loop.S1_BELOW_LIMIT (scenario design)"],
         ["Anchored rows", f"{st['anchor_rows']} of {pl.WINDOW}", "D10, a priori"],
-        ["Sign gate", "steady-state gain dCa/dTc of a refit < 0", "D13: sign of the true gain on the cold branch "
-                                                                    "(tests: GainSign)"],
+        ["Sign gate", "steady-state gain dCa/dTc of a refit < 0, and 1 - a1 - a2 > 0", "D13: sign of the true gain on the "
+         "cold branch (tests: GainSign); 1 - a1 - a2 > 0 is a necessary condition of a stable local model, not a "
+         "sufficient one"],
         ["Excitation window", f"{rm.N_EXC} samples after a set-point change", "D14: 4 time constants of the start-up "
                                                                               "FOPDT model, a priori"],
         ["Solver result accepted", f"bound violation <= {mpc.FEAS_TOL:g} K, status 'solved'",
@@ -787,8 +869,11 @@ def readme_section(S, R0):
     nss = {c: int(np.sum(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1] <= SS_LIMIT))
            for c in KMPC_CRIT + GATE_GROUP}
     ss.update({c: np.max(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1]) for c in GATE_GROUP})
-    stt = {r["conf"]: r for r in step_table(S)}
+    stt = {r["conf"]: r for r in step_table(S, SCENARIOS, "step_ms")}
     ign_b = {c: sum(int(m["ignition"]) for _, m in runs(S, "S5b", c)) for c in configs(S, "S5b")}
+    exc_s2 = int(np.sum(values(S, "S2", EXC, lambda m: m.get("rows_added"))[1] == 0))
+    sti = {r["conf"]: r for r in step_table(S, IN_SET, "full_ms")}
+    stb = {r["conf"]: r for r in step_table(S, ("S5b",), "full_ms")}
     pa = pair_stats(S, "K-MPC adaptive", "K-MPC static", "S3")
     pn = pair_stats(S, "K-MPC adaptive", "NMPC on the same KRR", "S1")
     pp = pair_stats(S, "K-MPC adaptive", "PID", "S1", TV)
@@ -819,11 +904,16 @@ def readme_section(S, R0):
          "- The same for the remedies (D10, D13 chosen on the tuning scenario S0; D14 from the independent analysis): "
          + "; ".join(f"{c} on {nss[c]} of {n} (worst {ss[c]:.4f})" for c in GATE_GROUP) + ". The sign gate keeps a "
          "refit of the window model only if its steady-state gain dCa/dTc is negative, as it is for this reactor "
-         "throughout the admissible set; it was added after the S2 result and chosen on S0.",
+         "throughout the admissible set; it was added after the S2 result and chosen on S0. The excitation window adds "
+         f"rows only after a set-point change: in S2 it added none on {exc_s2} of {n} seeds, so there its result is "
+         "that of the KRR of the start-up record, not of an adapted model.",
          *validation_readme_lines(),
-         f"- Step time, 95th percentile, one BLAS thread: K-MPC adaptive {stt['K-MPC adaptive']['p95_med']:.1f} ms "
-         f"(median over runs, highest {stt['K-MPC adaptive']['p95_max']:.1f}), NMPC on the same KRR "
-         f"{stt['NMPC on the same KRR']['p95_med']:.1f} ms.",
+         f"- Step time (identifier + controller, one sample), 95th percentile, one BLAS thread, inside the set: K-MPC "
+         f"adaptive {sti['K-MPC adaptive']['p95_med']:.1f} ms (median over runs, highest "
+         f"{sti['K-MPC adaptive']['p95_max']:.1f}), NMPC on the same KRR {sti['NMPC on the same KRR']['p95_med']:.1f} ms; "
+         f"controller part alone (QP) {stt['K-MPC adaptive']['p95_med']:.1f} ms. Outside the set (S5b) the identifier "
+         f"refits often: K-MPC adaptive {stb['K-MPC adaptive']['p95_med']:.1f} ms (highest "
+         f"{stb['K-MPC adaptive']['p95_max']:.1f}).",
          f"- S1: K-MPC adaptive has a lower IAE than NMPC on the same KRR on {pn['a_better']} of {pn['n']} seeds "
          f"(median ratio {pn['ratio_median']:.3f}); a smaller total variation of Tc than PID on {pp['a_better']} of "
          f"{pp['n']} (median ratio {pp['ratio_median']:.3f}).",

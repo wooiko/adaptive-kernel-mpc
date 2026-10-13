@@ -1,12 +1,14 @@
 """Part 2, 20 seeds: every configuration of run_mpc.PLAN on S1-S6 with the frozen settings of S0.
 
     python run_mpc_seeds.py                    # seeds 0-19, writes outputs/mpc_seeds.json
-    python run_mpc_seeds.py --cache DIR        # also keep each finished run in DIR and skip runs found there
+    python run_mpc_seeds.py --cache DIR        # also keep each finished run in DIR and skip runs found there that were
+                                               # computed with the same code and settings (run_mpc.code_fingerprint)
 
 Two worker processes, one BLAS thread each (set before numpy is imported). The oracle NMPC on the true
 model runs only on the reference seed (run_mpc.py, outputs/mpc_metrics.json), not here (TZ 7).
 Seed 0 here repeats the runs of run_mpc.py for seed 0; the two files must agree on every non-time field
-(tests/test_mpc.py). Time fields (step_ms, ident_ms, wall_s, wall_s_total) change between runs.
+(tests/test_mpc.py). Time fields (step_ms, ident_ms, full_ms, wall_s, wall_s_total) change between runs. The file records its provenance
+(code fingerprint, git commit, runs computed and taken from the cache; audit 1, C1).
 """
 import os
 
@@ -56,13 +58,15 @@ def main():
         comm = {seed: (c, h) for seed, c, h in ex.map(commission, seeds)}
     t_comm = time.perf_counter() - t0
     sizes = {k: len(f(0, lim["tc_max"])["r"]) for k, f in cl.SCENARIOS.items()}
+    fp, cached = rm.code_fingerprint(), []
     jobs, results, logs = [], {}, {}   # logs: S4 only, for the inputs moved by spikes (run_mpc.s4_moves)
     for seed in seeds:
         for scen, names in rm.PLAN.items():
             for name in names:
                 f = args.cache / cache_name(seed, scen, name) if args.cache else None
-                if f is not None and f.exists():
-                    rec = json.loads(f.read_text())
+                rec = json.loads(f.read_text()) if f is not None and f.exists() else None
+                if rec is not None and rec.get("code") == fp:   # same code and settings only (audit 1, C1)
+                    cached.append((seed, scen, name))
                     results.setdefault(seed, {}).setdefault(scen, {})[name] = rec["m"]
                     if rec["log"] is not None:
                         logs.setdefault(seed, {})[(scen, name)] = rec["log"]
@@ -80,7 +84,7 @@ def main():
             if lg is not None:
                 logs.setdefault(seed, {})[(scen, name)] = lg
             if args.cache:
-                (args.cache / cache_name(seed, scen, name)).write_text(json.dumps({"m": m, "log": lg}))
+                (args.cache / cache_name(seed, scen, name)).write_text(json.dumps({"code": fp, "m": m, "log": lg}))
             done += 1
             if done % 20 == 0:
                 print(f"{done}/{len(jobs)} runs, {time.perf_counter() - t0:.0f} s", flush=True)
@@ -92,7 +96,8 @@ def main():
         out[str(seed)] = {"startup_block_sha256_16": comm[seed][1],
                           "commissioning": {"sigma": comm[seed][0]["sigma"], "lam": comm[seed][0]["lam"]},
                           "results": {scen: {name: sk[scen][name] for name in rm.PLAN[scen]} for scen in sorted(sk)}}
-    res = {"seeds": seeds, "machine": rm.machine(), "settings": rm.settings_block(lim, s),
+    res = {"seeds": seeds, "machine": rm.machine(), "provenance": rm.provenance(len(jobs), cached),
+           "settings": rm.settings_block(lim, s),
            "tc_max": {k: lim[k] for k in ("tc_max", "worst_limit", "worst_vertex", "margin", "ca_nominal_at_tc_max")},
            "wall_s_total": wall, "by_seed": out}
     args.out.parent.mkdir(exist_ok=True)

@@ -316,6 +316,33 @@
       },
       {
         "scenario": "S5a",
+        "config": "K-MPC adaptive, sign gate",
+        "max_T_code": 330.3169781715034,
+        "max_T_lsoda": 330.316993688239,
+        "max_abs_diff_T": 1.5955326091443567e-05,
+        "same_verdict": true,
+        "ignition_code": false
+      },
+      {
+        "scenario": "S5a",
+        "config": "K-MPC adaptive, anchored window, sign gate",
+        "max_T_code": 330.0921426367731,
+        "max_T_lsoda": 330.0921412721204,
+        "max_abs_diff_T": 1.6051849513587513e-05,
+        "same_verdict": true,
+        "ignition_code": false
+      },
+      {
+        "scenario": "S5a",
+        "config": "K-MPC adaptive, excitation window",
+        "max_T_code": 330.29510253946154,
+        "max_T_lsoda": 330.2951041563355,
+        "max_abs_diff_T": 1.5962530994784174e-05,
+        "same_verdict": true,
+        "ignition_code": false
+      },
+      {
+        "scenario": "S5a",
         "config": "NMPC on the same KRR",
         "max_T_code": 330.3171651747871,
         "max_T_lsoda": 330.31718055451876,
@@ -383,6 +410,33 @@
         "max_T_code": 484.6982646464749,
         "max_T_lsoda": 484.698034543486,
         "max_abs_diff_T": 0.191101835531299,
+        "same_verdict": true,
+        "ignition_code": true
+      },
+      {
+        "scenario": "S5b",
+        "config": "K-MPC adaptive, sign gate",
+        "max_T_code": 485.05094776302286,
+        "max_T_lsoda": 485.04937411916217,
+        "max_abs_diff_T": 0.044295830249836854,
+        "same_verdict": true,
+        "ignition_code": true
+      },
+      {
+        "scenario": "S5b",
+        "config": "K-MPC adaptive, anchored window, sign gate",
+        "max_T_code": 474.60515931885305,
+        "max_T_lsoda": 474.60426611192577,
+        "max_abs_diff_T": 0.23320755385674374,
+        "same_verdict": true,
+        "ignition_code": true
+      },
+      {
+        "scenario": "S5b",
+        "config": "K-MPC adaptive, excitation window",
+        "max_T_code": 478.1875402331102,
+        "max_T_lsoda": 478.1880661051235,
+        "max_abs_diff_T": 0.008730809026360475,
         "same_verdict": true,
         "ignition_code": true
       },

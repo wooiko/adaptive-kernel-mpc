@@ -413,7 +413,9 @@ def segment_metrics(ca, r, starts, n, ts=data.TS, band=BAND, ss_window=SS_WINDOW
 
 
 def run_metrics(log, starts, u_min, u_max, du_max, k0=LAG):
-    """Whole-run metrics on the true Ca; k0: first controlled sample."""
+    """Whole-run metrics on the true Ca; k0: first controlled sample. Time per sample: step_ms = controller only
+    (QP and its preparation), ident_ms = identifier only (filter, window, refit, GP variance along the plan),
+    full_ms = both, measured on the same sample (the step of the controller in TZ 4, decision D15)."""
     ca, r, u, T = log["Ca"], log["r"], log["u"], log["T"]
     n = len(r)
     du = np.diff(u)
@@ -432,5 +434,7 @@ def run_metrics(log, starts, u_min, u_max, du_max, k0=LAG):
             "statuses": {s: int(sum(1 for x in log["status"][k0:] if x == s)) for s in set(log["status"][k0:])},
             "step_ms": {"median": float(np.median(tc)), "p95": float(np.percentile(tc, 95)), "max": float(np.max(tc))},
             "ident_ms": {"median": float(np.median(ti)), "p95": float(np.percentile(ti, 95)), "max": float(np.max(ti))},
+            "full_ms": {"median": float(np.median(tc + ti)), "p95": float(np.percentile(tc + ti, 95)),
+                        "max": float(np.max(tc + ti))},   # the whole sample: identifier + controller (TZ 14, D15)
             "share_not_normal": float(np.mean(log["regime"][k0:] > 0)),
             "n_flagged_rt": int(np.sum(log["flagged_rt"]))}

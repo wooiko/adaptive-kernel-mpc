@@ -26,6 +26,7 @@ import numpy as np  # noqa: E402
 from threadpoolctl import threadpool_limits  # noqa: E402
 
 import closed_loop as cl  # noqa: E402
+import mpc  # noqa: E402
 import run_mpc as rm  # noqa: E402
 import safety  # noqa: E402
 
@@ -38,8 +39,10 @@ GAIN_STEP = 0.05     # K, central difference of the true steady-state gain
 
 
 def ss_gain(g):
-    a1, a2, b1, b2 = g
-    return float((b1 + b2) / (1.0 - a1 - a2))
+    """mpc.ss_gain; NaN where 1 - a1 - a2 <= 0 (the local model has no stable steady state: no gain to compare;
+    such probes are counted separately, audit 1, N3)."""
+    k = mpc.ss_gain(g)
+    return np.nan if k is None else k
 
 
 def true_gain(u, p):
@@ -64,6 +67,12 @@ class Probe:
         return self.inner.step(k, y, u, r, info)
 
 
+def wrong_share(rows):
+    """Share of the probes with a steady state of the local model whose gain sign differs from the true one."""
+    ok = ~np.isnan(rows[:, 1])
+    return float(np.mean(rows[ok, 1] * rows[ok, 2] <= 0)) if ok.any() else float("nan")
+
+
 def run_seed(seed):
     with threadpool_limits(1):
         lim = safety.tc_max()["tc_max"]
@@ -86,8 +95,9 @@ def run(seed, name, c, lim):
         dist = rows[rows[:, 0] >= n1]
         return {"seed": seed, "config": name,
                 "ss_error_hold": [m["segments"][i]["ss_error"] for i in hold],
-                "wrong_sign_share_all": float(np.mean(rows[:, 1] * rows[:, 2] <= 0)),
-                "wrong_sign_share_disturbance_part": float(np.mean(dist[:, 1] * dist[:, 2] <= 0)),
+                "wrong_sign_share_all": wrong_share(rows),
+                "wrong_sign_share_disturbance_part": wrong_share(dist),
+                "no_steady_state_share_all": float(np.mean(np.isnan(rows[:, 1]))),
                 "gain_ratio_end": float(rows[-1, 1] / rows[-1, 2]),
                 "window_tc_std_start": float(rows[0, 3]), "window_tc_std_end": float(rows[-1, 3]),
                 "iae_total": m["iae_total"], "tv": m["tc_total_variation"], "violations": m["violations"],
