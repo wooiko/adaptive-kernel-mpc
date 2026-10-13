@@ -37,6 +37,7 @@ SCENARIOS = ("S1", "S2", "S3", "S4", "S5a", "S5b", "S6")
 KMPC_CRIT = ("K-MPC static", "K-MPC adaptive")       # "both K-MPC" of TZ 9
 FALLBACK_LIMIT = 0.001                              # share of steps (TZ 9; counted as decided in TZ 14, D11)
 STEP_LIMIT_MS = 60.0                                # p95 of one controller step (TZ 4: 1 % of Ts)
+PCT_STEP = 95.0                                     # TZ 4: the 95th percentile
 SS_LIMIT = rm.SS_LIMIT                              # mol/L, S2 steady-state error (TZ 9)
 TIE_TOL = 1e-6                                      # relative: two values closer than this count as equal (audit 1,
                                                     # C3: with m_k = 1 the asymmetric and symmetric QP differ by solver
@@ -151,7 +152,26 @@ def is_mpc(conf):
 
 # ---------------------------------------------------------------- acceptance (TZ 9)
 
-def criteria(S, R0):
+STEP_FILE = OUT / "mpc_step_time.json"   # measure_step_time.py (D15 as refined 13.10.2026)
+
+
+def load_step_time():
+    return json.loads(STEP_FILE.read_text()) if STEP_FILE.exists() else None
+
+
+def step_check(ST):
+    """D15 (refined 13.10.2026): per K-MPC configuration the median over valid passes of A (CPU p95 of all samples in the
+    set together) <= STEP_LIMIT_MS. Returns (passed, highest median A, its configuration) or None if not measured."""
+    if not ST or not ST.get("complete") or not ST.get("decision"):
+        return None
+    dec = {c: d for c, d in ST["decision"].items() if c.startswith("K-MPC")}
+    w = max(dec, key=lambda c: dec[c]["A_median_ms"])
+    return all(d["A_median_ms"] <= STEP_LIMIT_MS for d in dec.values()), dec[w]["A_median_ms"], w
+
+
+def criteria(S, R0, ST=None):
+    """ST: result of measure_step_time.py (None: read outputs/mpc_step_time.json)."""
+    ST = load_step_time() if ST is None else ST
     """The checks of TZ section 9 that the result files decide. Returns a list of dicts."""
     out = []
     viol = sum(m["violations"] for sc in SCENARIOS for c in configs(S, sc) for _, m in runs(S, sc, c))
@@ -175,13 +195,14 @@ def criteria(S, R0):
     out.append({"id": "fallback", "text": f"Fallback plan in at most {100 * FALLBACK_LIMIT:.1f} % of the steps of each MPC "
                                          f"configuration, all seeds of {', '.join(IN_SET)} together (TZ 14, D11)",
                 "value": "highest " + max(fb, key=lambda r: r["share"])["text"], "pass": not bad})
-    st = step_table(S, IN_SET, "full_ms")
-    km = [r for r in st if r["conf"].startswith("K-MPC")]
-    w = max(km, key=lambda r: r["p95_max"])
-    out.append({"id": "step_time", "text": f"K-MPC step time (identifier + controller, one sample), 95th percentile <= "
-                                          f"{STEP_LIMIT_MS:.0f} ms, one BLAS thread, {', '.join(IN_SET)} (TZ 14, D15)",
-                "value": f"highest p95 of a run {w['p95_max']:.1f} ms ({w['conf']}, {w['where']})",
-                "pass": all(r["p95_max"] <= STEP_LIMIT_MS for r in km)})
+    sc = step_check(ST)
+    out.append({"id": "step_time", "text": f"K-MPC step time: CPU time of identifier + controller per sample, 95th percentile "
+                                          f"of all samples of each configuration in {', '.join(IN_SET)}, median of the "
+                                          f"valid passes <= {STEP_LIMIT_MS:.0f} ms, one process on one vCPU, one BLAS "
+                                          "thread (TZ 14, D15 refined 13.10.2026)",
+                "value": ("not measured (outputs/mpc_step_time.json missing or incomplete)" if sc is None else
+                          f"highest {sc[1]:.1f} ms ({sc[2]})"),
+                "pass": bool(sc and sc[0])})
     return out
 
 
@@ -369,14 +390,16 @@ def write_report(S, R0, T, diag, ind):
         L.append("No run applied the fallback plan.\n")
 
     sec.h("Step time")
-    L.append(f"One BLAS thread per run, {S['machine']['workers']} runs in parallel on the machine named above. The step "
-             "of the controller (TZ 4, D15) is the whole sample: identifier (filter, window, refit, GP variance along "
-             "the plan) plus controller (linearisation, QP or SLSQP). Over the runs of a configuration: median of the "
-             "run medians, median and highest of the run 95th percentiles, highest single sample.\n")
+    L.extend(step_time_text(load_step_time()))
+    L.append(f"Wall time in the 20-seed run itself ({S['machine']['workers']} runs in parallel, one BLAS thread each; not "
+             "the acceptance measure: it includes the time a process waits for the CPU, see the analysis in TZ 14). The "
+             "step is the whole sample: identifier (filter, window, refit, GP variance along the plan) plus controller "
+             "(linearisation, QP or SLSQP). Over the runs of a configuration: median of the run medians, median and "
+             "highest of the run 95th percentiles, highest single sample.\n")
     head = ["Configuration", "runs", "median, ms", "p95 median, ms", "p95 highest, ms", "where", "max, ms"]
     fmt = lambda tab: [[r["conf"], r["runs"], f"{r['median']:.1f}", f"{r['p95_med']:.1f}", f"{r['p95_max']:.1f}",   # noqa: E731
                         r["where"], f"{r['max']:.1f}"] for r in tab]
-    L.append(f"Whole sample, inside the set ({', '.join(IN_SET)}; the acceptance check):\n")
+    L.append(f"Whole sample, inside the set ({', '.join(IN_SET)}):\n")
     L.append(md_table(head, fmt(step_table(S, IN_SET, "full_ms"))) + "\n")
     L.append("Whole sample, S5b (outside the set, no limit):\n")
     L.append(md_table(head, fmt(step_table(S, ("S5b",), "full_ms"))) + "\n")
@@ -463,6 +486,45 @@ def choices_rows(T, ind):
         ["S3 diagnostic", "true Ca, k0 and gains", "diagnostic by the truth"],
     ]
     return rows
+
+
+def step_time_text(ST):
+    """Section on measure_step_time.py: the acceptance measurement of the step time (D15 refined 13.10.2026)."""
+    if not ST:
+        return ["Step time by D15 (refined 13.10.2026): not measured (outputs/mpc_step_time.json missing).\n"]
+    mc = ST["machine"]
+    out = [f"Acceptance measurement (measure_step_time.py; {ST['rule']}). Machine: {mc['cpu_model']}, {mc['logical_cpus']} "
+           f"logical CPUs, hypervisor flag {mc['hypervisor_flag']}, {mc['platform']}, Python {mc['python']}, BLAS "
+           + ", ".join(f"{b['internal_api']} {b['version']} ({b['num_threads']} thread)" for b in mc["blas"])
+           + "; one process pinned to one vCPU.\n"]
+    out.append(md_table(["Pass", "start (UTC)", "wall, h", "lost time", "benchmark before / after, ms", "drift",
+                         "runs equal to mpc_seeds.json", "valid"],
+                        [[p["label"], p["start_utc"], f"{p['wall_s'] / 3600:.2f}", f"{100 * p['lost_share']:.2f} %",
+                          f"{p['benchmark_before']['total_ms']:.1f} / {p['benchmark_after']['total_ms']:.1f}",
+                          f"{100 * p['benchmark_drift']:.1f} %",
+                          f"{len(p['runs']) - p['runs_not_equal_to_mpc_seeds']} of {len(p['runs'])}",
+                          "yes" if p["valid"] else "**no**"] for p in ST["passes"]]) + "\n")
+    if not ST.get("complete"):
+        out.append("The measurement is incomplete: no decision.\n")
+        return out
+    valid = [p for p in ST["passes"] if p["valid"]]
+    rows = []
+    for c, d in ST["decision"].items():
+        q = [p["configs"][c] for p in valid]
+        rf = [x["refit_share"] for x in q]
+        rows.append([c, " / ".join(f"{a:.1f}" for a in d["A_by_pass_ms"]), f"{d['A_median_ms']:.1f}",
+                     f"{np.median([x['B_wall_p95_ms'] for x in q]):.1f}",
+                     f"{np.median([x['cpu_p95_without_refit_ms'] for x in q]):.1f}", f"{100 * np.median(rf):.2f} %",
+                     "-" if q[0]["refit_cpu_median_ms"] is None else
+                     f"{np.median([x['refit_cpu_median_ms'] for x in q]):.1f} / {np.median([x['refit_cpu_p95_ms'] for x in q]):.1f}",
+                     f"{q[0]['refit_samples_over_limit_cpu']} of {round(q[0]['refit_share'] * q[0]['samples'])}",
+                     "yes" if d["pass"] else "**no**"])
+    out.append("Per configuration, all samples of the set together; CPU time unless named wall; milliseconds; refit "
+               "columns from the first valid pass where a count is given:\n")
+    out.append(md_table(["Configuration", "A by pass", "A, median", "wall p95 (B)", "CPU p95 without refits",
+                         "refit samples", "refit CPU median / p95", f"refit samples over {STEP_LIMIT_MS:.0f} ms",
+                         f"A <= {STEP_LIMIT_MS:.0f}"], rows) + "\n")
+    return out
 
 
 class Sections:
@@ -869,11 +931,8 @@ def readme_section(S, R0):
     nss = {c: int(np.sum(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1] <= SS_LIMIT))
            for c in KMPC_CRIT + GATE_GROUP}
     ss.update({c: np.max(values(S, "S2", c, lambda m: m["ss_error_max_abs_hold"])[1]) for c in GATE_GROUP})
-    stt = {r["conf"]: r for r in step_table(S, SCENARIOS, "step_ms")}
     ign_b = {c: sum(int(m["ignition"]) for _, m in runs(S, "S5b", c)) for c in configs(S, "S5b")}
     exc_s2 = int(np.sum(values(S, "S2", EXC, lambda m: m.get("rows_added"))[1] == 0))
-    sti = {r["conf"]: r for r in step_table(S, IN_SET, "full_ms")}
-    stb = {r["conf"]: r for r in step_table(S, ("S5b",), "full_ms")}
     pa = pair_stats(S, "K-MPC adaptive", "K-MPC static", "S3")
     pn = pair_stats(S, "K-MPC adaptive", "NMPC on the same KRR", "S1")
     pp = pair_stats(S, "K-MPC adaptive", "PID", "S1", TV)
@@ -908,12 +967,7 @@ def readme_section(S, R0):
          f"rows only after a set-point change: in S2 it added none on {exc_s2} of {n} seeds, so there its result is "
          "that of the KRR of the start-up record, not of an adapted model.",
          *validation_readme_lines(),
-         f"- Step time (identifier + controller, one sample), 95th percentile, one BLAS thread, inside the set: K-MPC "
-         f"adaptive {sti['K-MPC adaptive']['p95_med']:.1f} ms (median over runs, highest "
-         f"{sti['K-MPC adaptive']['p95_max']:.1f}), NMPC on the same KRR {sti['NMPC on the same KRR']['p95_med']:.1f} ms; "
-         f"controller part alone (QP) {stt['K-MPC adaptive']['p95_med']:.1f} ms. Outside the set (S5b) the identifier "
-         f"refits often: K-MPC adaptive {stb['K-MPC adaptive']['p95_med']:.1f} ms (highest "
-         f"{stb['K-MPC adaptive']['p95_max']:.1f}).",
+         readme_step_line(),
          f"- S1: K-MPC adaptive has a lower IAE than NMPC on the same KRR on {pn['a_better']} of {pn['n']} seeds "
          f"(median ratio {pn['ratio_median']:.3f}); a smaller total variation of Tc than PID on {pp['a_better']} of "
          f"{pp['n']} (median ratio {pp['ratio_median']:.3f}).",
@@ -945,6 +999,24 @@ def readme_section(S, R0):
          "![seeds](outputs/fig6_seeds.png)", "",
          README_END]
     return "\n".join(L)
+
+
+def readme_step_line():
+    ST = load_step_time()
+    sc = step_check(ST)
+    if sc is None:
+        return "- Step time by D15 (CPU time of identifier + controller, all samples together): not measured yet."
+    valid = [p for p in ST["passes"] if p["valid"]]
+    d, q = ST["decision"]["K-MPC adaptive"], [p["configs"]["K-MPC adaptive"] for p in valid]
+    n_ref = round(q[0]["refit_share"] * q[0]["samples"])
+    return (f"- Step time (TZ 4, D15): CPU time of identifier + controller per sample, 95th percentile of all samples of "
+            f"{', '.join(IN_SET)}, median of {len(valid)} passes, one process on one vCPU: K-MPC adaptive "
+            f"{d['A_median_ms']:.1f} ms; highest {sc[1]:.1f} ms ({sc[2]}); limit {STEP_LIMIT_MS:.0f} ms "
+            + ("met." if sc[0] else "**not met**.") + f" A refit of the window model ({100 * q[0]['refit_share']:.1f} % "
+            f"of the samples of K-MPC adaptive) takes {q[0]['refit_cpu_median_ms']:.0f} ms of CPU (median); "
+            f"{q[0]['refit_samples_over_limit_cpu']} of {n_ref} refit samples are longer than {STEP_LIMIT_MS:.0f} ms"
+            + (f"; with every refit over the limit, the 95th percentile can meet it only while refits are under "
+               f"{100 - PCT_STEP:.0f} % of the samples." if q[0]["refit_samples_over_limit_cpu"] == n_ref and n_ref else "."))
 
 
 def validation_readme_lines():

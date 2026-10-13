@@ -635,6 +635,67 @@ def _metrics_stub(**kw):
             "full_ms": {"median": 5.0, "p95": 9.0, "max": 20.0}, **kw}
 
 
+def _step_stub(**a_by_pass):
+    """A result of measure_step_time.py: decision per configuration from the A values of three valid passes."""
+    import measure_step_time as ms
+    confs = {"K-MPC static": [20.0] * 3, "K-MPC adaptive": [30.0] * 3, "NMPC on the same KRR": [40.0] * 3, **a_by_pass}
+    passes = [{"valid": True, "configs": {c: {"A_cpu_p95_ms": a[i]} for c, a in confs.items()}} for i in range(3)]
+    return {"complete": True, "decision": ms.decide(passes), "passes": passes}
+
+
+class StepTimeMeasurement(unittest.TestCase):
+    """D15 (refined 13.10.2026), measure_step_time.py. Mutations: benchmark drift ignored; invalid passes in the median;
+    wall time pooled as CPU time; CPU clock replaced by the wall clock."""
+    def test_pass_validity(self):
+        import measure_step_time as ms
+        self.assertTrue(ms.pass_valid(0.04, 100.0, 109.0)[0])
+        self.assertFalse(ms.pass_valid(0.06, 100.0, 100.0)[0])          # lost time over 5 %
+        self.assertFalse(ms.pass_valid(0.01, 100.0, 111.0)[0])          # benchmark drift over 10 %
+
+    def test_decide_on_valid_passes(self):
+        import measure_step_time as ms
+        P = lambda a, v: {"valid": v, "configs": {"K-MPC adaptive": {"A_cpu_p95_ms": a}}}   # noqa: E731
+        d = ms.decide([P(50.0, True), P(90.0, False), P(55.0, True), P(58.0, True)])["K-MPC adaptive"]
+        self.assertEqual(d["A_by_pass_ms"], [50.0, 55.0, 58.0])
+        self.assertEqual((d["A_median_ms"], d["pass"]), (55.0, True))
+
+    def test_pooled_on_cpu_time(self):
+        import measure_step_time as ms
+        R = np.zeros((100, 5))
+        R[:, 0], R[:, 1], R[:, 2], R[:, 3] = 10.0, 30.0, 5.0, 5.0      # CPU 15 ms, wall 35 ms per sample
+        R[:4, 0], R[:4, 1], R[:4, 4] = 80.0, 90.0, 1.0                  # four refits
+        p = ms.pooled({"x": [R[:50], R[50:]]})["x"]
+        self.assertEqual((p["samples"], p["A_cpu_p95_ms"], p["B_wall_p95_ms"]), (100, 15.0, 35.0))
+        self.assertEqual((p["refit_share"], p["refit_cpu_median_ms"], p["refit_samples_over_limit_cpu"]), (0.04, 85.0, 4))
+
+    def test_clock_separates_cpu_from_waiting(self):
+        import time as tm
+        import measure_step_time as ms
+
+        class Ident:
+            horizon = 0
+
+            def step(self, x):
+                tm.sleep(0.03)                                         # waiting: wall time, no CPU time
+                self._refit()
+
+            def learn(self):
+                sum(range(20000))
+
+            def _refit(self):
+                pass
+        clock, inner = ms.Clock(), Ident()
+        ms.watch_refits(inner, clock)
+        idt = ms.TimedIdent(inner, clock)
+        idt.learning = False
+        idt.step(0); idt.learn(); idt.step(1)
+        R = np.array(clock.rows)
+        self.assertEqual(len(R), 2)
+        self.assertFalse(inner.learning)
+        self.assertTrue(np.all(R[:, 4] == 1.0))
+        self.assertTrue(np.all(R[:, 1] >= 30.0) and np.all(R[:, 0] < 10.0))
+
+
 class ReportAcceptance(unittest.TestCase):
     """TZ 9 checks as report_mpc.criteria decides them, on synthetic result files: violations over all runs (S5b
     included); ignition and fallback (D11) only inside the admissible set. Mutations: fallback steps of S5b counted in
@@ -645,7 +706,7 @@ class ReportAcceptance(unittest.TestCase):
         for (sc, c), kw in changes.items():
             res[sc][c].update(kw)
         S = {"by_seed": {"0": {"results": res}}}
-        return S, {"seed": 0, "results": {"S1": {"PID": _metrics_stub()}}}
+        return S, {"seed": 0, "results": {"S1": {"PID": _metrics_stub()}}}, _step_stub()
 
     def verdict(self, changes):
         import report_mpc as rp
@@ -661,10 +722,13 @@ class ReportAcceptance(unittest.TestCase):
         self.assertFalse(self.verdict({("S4", "K-MPC static"): {"ignition": True}})["ignition"])
         self.assertFalse(self.verdict({("S5b", "PID"): {"violations": 1}})["violations"])   # every run counts
         self.assertFalse(self.verdict({("S2", "K-MPC adaptive"): {"ss_error_max_abs_hold": 0.0011}})["s2"])
-        slow = {"median": 30.0, "p95": 61.0, "max": 70.0}
-        self.assertFalse(self.verdict({("S3", "K-MPC adaptive"): {"full_ms": slow}})["step_time"])   # whole sample (D15)
-        self.assertTrue(self.verdict({("S5b", "K-MPC adaptive"): {"full_ms": slow}})["step_time"])   # outside the set
-        self.assertTrue(self.verdict({("S3", "NMPC on the same KRR"): {"full_ms": slow}})["step_time"])   # not a K-MPC
+        import report_mpc as rp
+        S, R0, _ = self.files({})
+        step = lambda ST: {c["id"]: c["pass"] for c in rp.criteria(S, R0, ST)}["step_time"]   # noqa: E731
+        self.assertFalse(step(_step_stub(**{"K-MPC adaptive": [50.0, 61.0, 62.0]})))   # median of the passes (D15)
+        self.assertTrue(step(_step_stub(**{"K-MPC adaptive": [50.0, 59.0, 62.0]})))
+        self.assertTrue(step(_step_stub(**{"NMPC on the same KRR": [61.0, 61.0, 61.0]})))   # not a K-MPC
+        self.assertFalse(step({**_step_stub(), "complete": False}))                       # not measured: not met
 
     def test_ties_within_tolerance(self):
         """Audit 1, C3: values that differ by solver noise count as equal. Mutation: exact equality."""

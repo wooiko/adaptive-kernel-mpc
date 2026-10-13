@@ -31,7 +31,7 @@ Decided from the result files:
 | Ignition (T > 350 K) in S1, S2, S3, S4, S5a, S6, K-MPC static and K-MPC adaptive, all seeds | K-MPC static: 0 runs; K-MPC adaptive: 0 runs; highest T 330.4 K | yes |
 | S2: \|steady-state error\| on the true Ca <= 0.001 mol/L, both K-MPC, every seed | K-MPC static: worst 0.0008 (seed 2); K-MPC adaptive: worst 0.0053 (seed 15) | **no** |
 | Fallback plan in at most 0.1 % of the steps of each MPC configuration, all seeds of S1, S2, S3, S4, S5a, S6 together (TZ 14, D11) | highest 9 of 129760 steps (0.007 %, K-MPC adaptive, sign gate) | yes |
-| K-MPC step time (identifier + controller, one sample), 95th percentile <= 60 ms, one BLAS thread, S1, S2, S3, S4, S5a, S6 (TZ 14, D15) | highest p95 of a run 62.9 ms (K-MPC adaptive, anchored window, S6, seed 10) | **no** |
+| K-MPC step time: CPU time of identifier + controller per sample, 95th percentile of all samples of each configuration in S1, S2, S3, S4, S5a, S6, median of the valid passes <= 60 ms, one process on one vCPU, one BLAS thread (TZ 14, D15 refined 13.10.2026) | not measured (outputs/mpc_step_time.json missing or incomplete) | **no** |
 
 Decided by the tests (`python -m unittest discover -s tests`): G against central differences; QP matrices against numerical derivatives; OSQP against SciPy and the closed form; time convention; offset-free control; determinism (seed 0 of run_mpc.py and run_mpc_seeds.py, two separate runs, equal apart from the time fields: `SeedResults`); part 1 files unchanged (P12, `Part1Unchanged`); the numbers of the Part 2 section of README.md (`ReadmeNumbers`). Mutations: `tests/mutate_mpc.py`, log `outputs/mutations_mpc.txt`.
 
@@ -472,9 +472,11 @@ Every run with a fallback step (statuses other than 'solved'):
 
 ## 6. Step time
 
-One BLAS thread per run, 2 runs in parallel on the machine named above. The step of the controller (TZ 4, D15) is the whole sample: identifier (filter, window, refit, GP variance along the plan) plus controller (linearisation, QP or SLSQP). Over the runs of a configuration: median of the run medians, median and highest of the run 95th percentiles, highest single sample.
+Step time by D15 (refined 13.10.2026): not measured (outputs/mpc_step_time.json missing).
 
-Whole sample, inside the set (S1, S2, S3, S4, S5a, S6; the acceptance check):
+Wall time in the 20-seed run itself (2 runs in parallel, one BLAS thread each; not the acceptance measure: it includes the time a process waits for the CPU, see the analysis in TZ 14). The step is the whole sample: identifier (filter, window, refit, GP variance along the plan) plus controller (linearisation, QP or SLSQP). Over the runs of a configuration: median of the run medians, median and highest of the run 95th percentiles, highest single sample.
+
+Whole sample, inside the set (S1, S2, S3, S4, S5a, S6):
 
 | Configuration | runs | median, ms | p95 median, ms | p95 highest, ms | where | max, ms |
 |---|---|---|---|---|---|---|
