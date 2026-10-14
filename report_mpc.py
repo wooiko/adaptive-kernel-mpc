@@ -1013,7 +1013,8 @@ def readme_step_line():
             f"{', '.join(IN_SET)}, median of {len(valid)} passes, one process on one vCPU: K-MPC adaptive "
             f"{d['A_median_ms']:.1f} ms; highest {sc[1]:.1f} ms ({sc[2]}); limit {STEP_LIMIT_MS:.0f} ms "
             + ("met." if sc[0] else "**not met**.") + f" A refit of the window model ({100 * q[0]['refit_share']:.1f} % "
-            f"of the samples of K-MPC adaptive) takes {q[0]['refit_cpu_median_ms']:.0f} ms of CPU (median); "
+            f"of the samples of K-MPC adaptive) takes {np.median([x['refit_cpu_median_ms'] for x in q]):.0f} ms of CPU (median "
+            f"over the passes of the sample medians); in the first pass "
             f"{q[0]['refit_samples_over_limit_cpu']} of {n_ref} refit samples are longer than {STEP_LIMIT_MS:.0f} ms"
             + (f"; with every refit over the limit, the 95th percentile can meet it only while refits are under "
                f"{100 - PCT_STEP:.0f} % of the samples." if q[0]["refit_samples_over_limit_cpu"] == n_ref and n_ref else "."))

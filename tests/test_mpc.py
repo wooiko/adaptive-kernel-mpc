@@ -693,7 +693,8 @@ class StepTimeMeasurement(unittest.TestCase):
         self.assertEqual(len(R), 2)
         self.assertFalse(inner.learning)
         self.assertTrue(np.all(R[:, 4] == 1.0))
-        self.assertTrue(np.all(R[:, 1] >= 30.0) and np.all(R[:, 0] < 10.0))
+        self.assertTrue(np.all(R[:, 1] >= 30.0) and np.all((R[:, 0] >= 0.0) & (R[:, 0] < 10.0)))
+        self.assertGreater(R[0, 0], 0.0)                               # the CPU work of learn is counted
 
 
 class ReportAcceptance(unittest.TestCase):

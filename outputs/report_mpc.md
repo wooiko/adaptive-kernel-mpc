@@ -31,7 +31,7 @@ Decided from the result files:
 | Ignition (T > 350 K) in S1, S2, S3, S4, S5a, S6, K-MPC static and K-MPC adaptive, all seeds | K-MPC static: 0 runs; K-MPC adaptive: 0 runs; highest T 330.4 K | yes |
 | S2: \|steady-state error\| on the true Ca <= 0.001 mol/L, both K-MPC, every seed | K-MPC static: worst 0.0008 (seed 2); K-MPC adaptive: worst 0.0053 (seed 15) | **no** |
 | Fallback plan in at most 0.1 % of the steps of each MPC configuration, all seeds of S1, S2, S3, S4, S5a, S6 together (TZ 14, D11) | highest 9 of 129760 steps (0.007 %, K-MPC adaptive, sign gate) | yes |
-| K-MPC step time: CPU time of identifier + controller per sample, 95th percentile of all samples of each configuration in S1, S2, S3, S4, S5a, S6, median of the valid passes <= 60 ms, one process on one vCPU, one BLAS thread (TZ 14, D15 refined 13.10.2026) | not measured (outputs/mpc_step_time.json missing or incomplete) | **no** |
+| K-MPC step time: CPU time of identifier + controller per sample, 95th percentile of all samples of each configuration in S1, S2, S3, S4, S5a, S6, median of the valid passes <= 60 ms, one process on one vCPU, one BLAS thread (TZ 14, D15 refined 13.10.2026) | highest 23.1 ms (K-MPC adaptive, no supervisor) | yes |
 
 Decided by the tests (`python -m unittest discover -s tests`): G against central differences; QP matrices against numerical derivatives; OSQP against SciPy and the closed form; time convention; offset-free control; determinism (seed 0 of run_mpc.py and run_mpc_seeds.py, two separate runs, equal apart from the time fields: `SeedResults`); part 1 files unchanged (P12, `Part1Unchanged`); the numbers of the Part 2 section of README.md (`ReadmeNumbers`). Mutations: `tests/mutate_mpc.py`, log `outputs/mutations_mpc.txt`.
 
@@ -472,7 +472,28 @@ Every run with a fallback step (statuses other than 'solved'):
 
 ## 6. Step time
 
-Step time by D15 (refined 13.10.2026): not measured (outputs/mpc_step_time.json missing).
+Acceptance measurement (measure_step_time.py; TZ 14, D15 (refined 13-14.10.2026): per K-MPC configuration, A = p95 of the CPU time of identifier + controller over all samples of S1, S2, S3, S4, S5a, S6, seeds 0-19; met if the median of A over 3 valid passes <= 60 ms; a pass is run in segments of 5 seeds, each valid if its lost time <= 5 % and its benchmark drift <= 10 %; an invalid segment is repeated at most 2 times). Machine: Intel(R) Xeon(R) Processor @ 2.10GHz, 2 logical CPUs, hypervisor flag True, Linux-6.18.44-fc-v114-x86_64-with-glibc2.39, Python 3.13.16, BLAS openblas 0.3.34.106.0 (1 thread), openblas 0.3.31.dev (1 thread), openmp None (1 thread); one process pinned to one vCPU.
+
+| Pass | start (UTC) | wall, h | lost time | benchmark before / after, ms | drift | runs equal to mpc_seeds.json | valid |
+|---|---|---|---|---|---|---|---|
+| pass1 | 2026-10-14T03:46:17Z | 4.22 | 1.52 % | 45.8 / 50.2 | 7.7 % | 900 of 900 | yes |
+| pass2 | 2026-10-14T08:10:33Z | 4.51 | 1.59 % | 49.6 / 50.7 | 3.2 % | 900 of 900 | yes |
+| pass3 | 2026-10-14T12:51:05Z | 4.46 | 1.56 % | 51.4 / 46.5 | 6.1 % | 900 of 900 | yes |
+
+Per configuration, all samples of the set together; CPU time unless named wall; milliseconds; refit columns from the first valid pass where a count is given:
+
+| Configuration | A by pass | A, median | wall p95 (B) | CPU p95 without refits | refit samples | refit CPU median / p95 | refit samples over 60 ms | A <= 60 |
+|---|---|---|---|---|---|---|---|---|
+| K-MPC adaptive | 22.4 / 23.6 / 21.6 | 22.4 | 24.2 | 16.1 | 4.83 % | 76.7 / 105.8 | 6062 of 6264 | yes |
+| K-MPC adaptive, anchored window | 22.3 / 23.7 / 21.6 | 22.3 | 24.1 | 16.1 | 4.83 % | 78.3 / 108.0 | 6179 of 6264 | yes |
+| K-MPC adaptive, anchored window, sign gate | 22.4 / 23.6 / 21.9 | 22.4 | 24.1 | 16.1 | 4.83 % | 78.5 / 108.2 | 6211 of 6263 | yes |
+| K-MPC adaptive, excitation window | 15.4 / 16.2 / 16.1 | 16.1 | 16.5 | 15.9 | 0.86 % | 82.1 / 113.5 | 1107 of 1110 | yes |
+| K-MPC adaptive, no filter | 28.4 / 20.4 / 22.1 | 22.1 | 23.1 | 15.8 | 4.82 % | 42.1 / 53.6 | 7 of 480 | yes |
+| K-MPC adaptive, no supervisor | 23.1 / 25.2 / 22.7 | 23.1 | 25.9 | 16.1 | 4.83 % | 76.7 / 106.6 | 6001 of 6264 | yes |
+| K-MPC adaptive, reference without spikes | 30.0 / 20.2 / 22.0 | 22.0 | 25.4 | 16.4 | 4.82 % | 79.4 / 110.6 | 475 of 480 | yes |
+| K-MPC adaptive, sign gate | 21.9 / 23.1 / 21.9 | 21.9 | 24.6 | 16.1 | 4.83 % | 76.5 / 104.9 | 6031 of 6266 | yes |
+| K-MPC adaptive, symmetric penalty | 21.8 / 22.9 / 22.5 | 22.5 | 23.4 | 15.9 | 4.81 % | 79.4 / 109.7 | 719 of 720 | yes |
+| K-MPC static | 22.0 / 23.6 / 23.0 | 23.0 | 23.4 | 23.0 | 0.00 % | - | 0 of 0 | yes |
 
 Wall time in the 20-seed run itself (2 runs in parallel, one BLAS thread each; not the acceptance measure: it includes the time a process waits for the CPU, see the analysis in TZ 14). The step is the whole sample: identifier (filter, window, refit, GP variance along the plan) plus controller (linearisation, QP or SLSQP). Over the runs of a configuration: median of the run medians, median and highest of the run 95th percentiles, highest single sample.
 

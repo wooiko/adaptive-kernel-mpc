@@ -5,3 +5,4 @@ venv/
 .vscode/
 .DS_Store
 audit/
+outputs/step_time/
