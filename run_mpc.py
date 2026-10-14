@@ -79,6 +79,42 @@ ORACLE_SCENARIOS = ("S1", "S5a")           # oracle NMPC: reference seed only (T
 KEEP_LOGS = ("S1", "S2", "S4", "S5a", "S5b")   # logs kept for the figures and the S4 comparison
 
 
+RUN_FILES = ("adaptive.py", "closed_loop.py", "controllers.py", "cstr.py", "data.py", "kernel.py", "mpc.py",
+             "pipeline.py", "run_demo.py", "run_mpc.py", "safety.py")   # the code that defines a closed-loop run
+
+
+def code_fingerprint(root=None):
+    """Audit 1, C1: SHA-256 (16 hex) of the code that defines a run (RUN_FILES, line endings normalised) and of the
+    frozen settings in outputs/mpc_tuning.json. Result files record it; a cached run is reused only under the same one;
+    tests/test_provenance.py checks that the result files match the code."""
+    root = Path(__file__).parent if root is None else Path(root)
+    h = hashlib.sha256()
+    for f in RUN_FILES:
+        h.update(f.encode() + b"\0" + (root / f).read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    h.update(json.dumps(json.loads((root / "outputs" / "mpc_tuning.json").read_text())["chosen"], sort_keys=True).encode())
+    return h.hexdigest()[:16]
+
+
+def git_commit(root=None):
+    """Commit of the working tree and whether a file of RUN_FILES differs from it (None if git is not available)."""
+    import subprocess
+    root = Path(__file__).parent if root is None else Path(root)
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True,
+                              env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--", *RUN_FILES], cwd=root, capture_output=True,
+                               text=True, check=True, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout.strip()
+        return {"commit": head, "run_files_modified": bool(dirty)}
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def provenance(n_computed, cached=()):
+    """Where the numbers of a result file come from (audit 1, C1)."""
+    return {"code_sha256_16": code_fingerprint(), "git": git_commit(), "runs_computed": int(n_computed),
+            "runs_from_cache": len(cached), "cached_runs": [list(c) for c in cached]}
+
+
 def commissioning(seed):
     """Start-up exactly as in part 1 (run_demo.simulated_run / stationary): the first 5/8 of the
     stationary log of this seed. Returns the commissioning result and a hash of the start-up block
@@ -142,7 +178,7 @@ def job(args):
         if learn_after_change(name) is not None:
             m["rows_added"] = int(ident.n_rows_added)
         m.update(scenario_extras(scen, sc, log, m))
-        keep_keys = ("Ca", "T", "u", "r", "y_meas", "mult", "regime", "flagged_rt", "fallback", "t_ctrl_ms")
+        keep_keys = ("Ca", "T", "u", "r", "y_meas", "mult", "regime", "flagged_rt", "fallback", "t_ctrl_ms", "t_ident_ms")
         return scen, name, m, ({k: np.asarray(log[k]).tolist() for k in keep_keys} if keep else None)
 
 
@@ -263,18 +299,19 @@ def s1_figure(lg, lim, path):
 
 
 def step_time_figure(logs, path):
-    """Step time of K-MPC (adaptive) and NMPC on the same KRR in S1, one BLAS thread."""
+    """Time of the whole sample (identifier + controller, D15) of K-MPC (adaptive) and NMPC on the same KRR in S1,
+    one BLAS thread."""
     import matplotlib.pyplot as plt
     import figures as fg
     fig, ax = plt.subplots(figsize=(7, 3.4))
     bins = np.logspace(0, 2.3, 50)
     for name, col in (("K-MPC adaptive", fg.BLUE), ("NMPC on the same KRR", fg.ORANGE)):
-        ms = np.asarray(logs[("S1", name)]["t_ctrl_ms"], float)
+        ms = np.asarray(logs[("S1", name)]["t_ctrl_ms"], float) + np.asarray(logs[("S1", name)]["t_ident_ms"], float)
         ms = ms[np.isfinite(ms)]
         ax.hist(ms, bins=bins, color=col, alpha=0.7, label=f"{name}: p95 {np.percentile(ms, 95):.1f} ms")
     ax.axvline(60.0, color=fg.INK, lw=1.2, ls=":", label="limit 60 ms")
     ax.set_xscale("log")
-    ax.set(title="Controller step time in S1, one BLAS thread", xlabel="ms", ylabel="steps")
+    ax.set(title="Step time in S1 (identifier + controller), one BLAS thread", xlabel="ms", ylabel="samples")
     ax.legend()
     fig.tight_layout()
     fig.savefig(path)
@@ -394,6 +431,7 @@ def main():
             logs[(scen, name)] = lg
     s4_moves(results, logs)
     res = {"seed": seed, "startup_block_sha256_16": block_hash, "machine": machine(),
+           "provenance": provenance(len(jobs)),
            "settings": settings_block(lim, s),
            "tc_max": {k: lim[k] for k in ("tc_max", "worst_limit", "worst_vertex", "margin", "ca_nominal_at_tc_max")},
            "commissioning": {"sigma": c["sigma"], "lam": c["lam"]},

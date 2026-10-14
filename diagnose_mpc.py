@@ -78,7 +78,8 @@ def diagnose(c, s, lim, name):
         class M:
             predict = staticmethod(lambda X: np.array([f(x) for x in np.atleast_2d(X)]))
         sim = pl.free_run(M, truth, uu)
-        u_win = Z[:, 2] * c["scaler"].sx[2] + c["scaler"].mx[2]
+        Zm = c["Z"] if name == "K-MPC static" else Z   # rows the model was fitted on (static: all start-up rows; N6)
+        u_win = Zm[:, 2] * c["scaler"].sx[2] + c["scaler"].mx[2]
         rows.append({"k": int(k), "k0_mult": p.k0 / cstr.CSTRParams().k0, "setpoint": float(r), "tc_true": tc,
                      "gain_true": g_true, "gain_model": g_mod, "gain_ratio": g_mod / g_true,
                      "ss_bias": ys - r, "free_run_rmse": float(np.sqrt(np.mean((sim[2:] - truth[2:]) ** 2))),

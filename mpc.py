@@ -105,21 +105,26 @@ def linear_model(theta, c0=0.0):
 
 
 def disturbance(model, y_k, x_km1):
-    """d_k = y_k - f(x_{k-1}): error of the one-step prediction made at k-1 for k, both from
-    real-time data (y_rt)."""
+    """d_k = y_k - f(x_{k-1}): residual of the model at the last real-time sample (y_rt), with the model as it is when
+    the controller runs at k. With an adaptive window the identifier steps first (closed_loop.run_loop) and may have
+    refitted the model on a window that already holds the row (x_{k-1}, y_k); then this is the residual of the refitted
+    model on that row, not the error of the prediction made at k-1 (audit 1, N1; on S2 a refit falls inside about 5 %
+    of the steps)."""
     return float(y_k - model.f(np.asarray(x_km1, float)))
 
 
 def ss_gain(g):
     """Steady-state gain dy/du of the local model y = a1 y + a2 y + b1 u + b2 u at a point with gradient
-    g = [a1, a2, b1, b2]; None if 1 - a1 - a2 <= 0 (no stable steady state of the local model)."""
+    g = [a1, a2, b1, b2]; None if 1 - a1 - a2 <= 0. 1 - a1 - a2 > 0 is necessary for a stable local model (roots of
+    z^2 - a1 z - a2 inside the unit circle) but not sufficient: a model with roots outside it can pass (audit 1, N2)."""
     a1, a2, b1, b2 = g
     den = 1.0 - a1 - a2
     return float((b1 + b2) / den) if den > 0 else None
 
 
 def sign_gate(ident, krr):
-    """refit_check for adaptive.AdaptiveIdentifier: keep a refit of the window model only if its steady-state gain
+    """refit_check for adaptive.AdaptiveIdentifier: keep a refit of the window model only if 1 - a1 - a2 > 0 (ss_gain;
+    a necessary, not a sufficient, condition of stability) and its steady-state gain
     dCa/dTc at the operating point of the newest window row is negative. On the cold branch of this reactor a
     higher coolant temperature always lowers Ca (tests/test_mpc.py, GainSign); a refit that loses this sign is
     rejected and the previous model stays."""

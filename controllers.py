@@ -14,7 +14,6 @@ same real-time measurement y (the filter's y_rt).
 import numpy as np
 from scipy.optimize import least_squares, minimize
 
-import cstr
 import data
 import mpc
 from safety import TC_MIN
