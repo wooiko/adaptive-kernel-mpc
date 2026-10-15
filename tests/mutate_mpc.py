@@ -137,6 +137,16 @@ MUTATIONS = [
      "S0 diagnostic: gain without the check of 1 - a1 - a2 (audit 1, N3)"),
     ("tune_ss_ignored", "run_mpc.py", 'r.get("violations", 0) == 0 and r["ss_max"] <= SS_LIMIT]',
      'r.get("violations", 0) == 0]', "tuning: steady-state limit ignored in the selection"),
+    ("ref_ignition_free", "check_reference_run.py", 'EXACT_RUN = ("violations", "ignition")', 'EXACT_RUN = ("violations",)',
+     "reference run: ignition not compared exactly (D16)"),
+    ("ref_factor_ignored", "check_reference_run.py", "            tol = factor * env[sc][k]", '            tol = float("inf")',
+     "reference run: tolerance factor ignored (D16)"),
+    ("ref_none_unpaired", "check_reference_run.py", '                return float("inf")\n            continue',
+     "                continue", "reference run: None paired with a number (D16)"),
+    ("ref_s5b_bounded", "check_reference_run.py", 'IN_SET = ("S1", "S2", "S3", "S4", "S5a", "S6")',
+     'IN_SET = ("S1", "S2", "S3", "S4", "S5a", "S5b", "S6")', "reference run: S5b under the tolerance (D16)"),
+    ("ref_time_printed", "check_reference_run.py", '"wall_s", "wall_s_total", "machine"}', '"wall_s_total"}',
+     "reference run: time fields compared (D16)"),
 ]
 
 

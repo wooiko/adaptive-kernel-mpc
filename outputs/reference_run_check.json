@@ -1,0 +1,960 @@
+{
+  "rule": "TZ 14, D16",
+  "factor": 10.0,
+  "passed": true,
+  "exact": [
+    {
+      "check": "code fingerprint",
+      "ok": true,
+      "detail": [
+        "73b3e5c8823c3091",
+        "73b3e5c8823c3091"
+      ]
+    },
+    {
+      "check": "seed",
+      "ok": true,
+      "detail": [
+        0,
+        0
+      ]
+    },
+    {
+      "check": "no cached runs",
+      "ok": true,
+      "detail": 0
+    },
+    {
+      "check": "same scenarios and configurations",
+      "ok": true,
+      "detail": {
+        "only_reference": [],
+        "only_candidate": []
+      }
+    },
+    {
+      "check": "same segments",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "same violations in every run",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "same ignition in every run",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "bounded": [
+    {
+      "scenario": "S1",
+      "metric": "iae_total",
+      "max_abs_diff": 8.9748727005734e-08,
+      "config": "linear MPC (OE)",
+      "envelope": 2.8584206668291756e-08,
+      "tolerance": 2.8584206668291756e-07,
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "metric": "tc_total_variation",
+      "max_abs_diff": 0.000474601279165654,
+      "config": "linear MPC (OE)",
+      "envelope": 0.00041355879534421547,
+      "tolerance": 0.004135587953442155,
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "metric": "max_T",
+      "max_abs_diff": 2.2264026711127372e-07,
+      "config": "linear MPC (OE)",
+      "envelope": 2.6309908207622357e-07,
+      "tolerance": 2.6309908207622357e-06,
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "metric": "ss_error",
+      "max_abs_diff": 4.801999127111364e-09,
+      "config": "linear MPC (OE)",
+      "envelope": 3.8613720244277255e-09,
+      "tolerance": 3.8613720244277255e-08,
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "metric": "iae_total",
+      "max_abs_diff": 1.6279405694319404e-07,
+      "config": "linear MPC (OE)",
+      "envelope": 1.6138625476280755e-07,
+      "tolerance": 1.6138625476280755e-06,
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "metric": "tc_total_variation",
+      "max_abs_diff": 0.0008599434124221261,
+      "config": "linear MPC (OE)",
+      "envelope": 0.0007456746873231168,
+      "tolerance": 0.007456746873231168,
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "metric": "max_T",
+      "max_abs_diff": 1.1002392739101197e-06,
+      "config": "linear MPC (OE)",
+      "envelope": 9.646744274505181e-07,
+      "tolerance": 9.646744274505181e-06,
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "metric": "ss_error",
+      "max_abs_diff": 5.474531104051467e-09,
+      "config": "linear MPC (OE)",
+      "envelope": 4.760450545045203e-09,
+      "tolerance": 4.760450545045203e-08,
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "metric": "iae_total",
+      "max_abs_diff": 0.0008247845879368332,
+      "config": "PID",
+      "envelope": 0.0008247845879450488,
+      "tolerance": 0.008247845879450488,
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "metric": "tc_total_variation",
+      "max_abs_diff": 1.3351574966852695,
+      "config": "linear MPC (OE)",
+      "envelope": 1.3401098497349722,
+      "tolerance": 13.401098497349722,
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "metric": "max_T",
+      "max_abs_diff": 3.0932732215660508e-06,
+      "config": "linear MPC (OE)",
+      "envelope": 2.6768410634758766e-06,
+      "tolerance": 2.6768410634758766e-05,
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "metric": "ss_error",
+      "max_abs_diff": 0.00041564210052766,
+      "config": "linear MPC (OE)",
+      "envelope": 0.000415646758220689,
+      "tolerance": 0.00415646758220689,
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "metric": "iae_total",
+      "max_abs_diff": 2.564163548157694e-08,
+      "config": "linear MPC (OE)",
+      "envelope": 5.0169011639455974e-08,
+      "tolerance": 5.016901163945597e-07,
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "metric": "tc_total_variation",
+      "max_abs_diff": 0.0004236024279293815,
+      "config": "linear MPC (OE)",
+      "envelope": 0.00036637258511973414,
+      "tolerance": 0.0036637258511973414,
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "metric": "max_T",
+      "max_abs_diff": 1.6340007391590916e-06,
+      "config": "linear MPC (OE)",
+      "envelope": 7.336431622206874e-07,
+      "tolerance": 7.336431622206874e-06,
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "metric": "ss_error",
+      "max_abs_diff": 1.7225110693266238e-09,
+      "config": "linear MPC (OE)",
+      "envelope": 1.926067485407204e-09,
+      "tolerance": 1.926067485407204e-08,
+      "ok": true
+    },
+    {
+      "scenario": "S5a",
+      "metric": "iae_total",
+      "max_abs_diff": 0.0011589324535425938,
+      "config": "K-MPC static",
+      "envelope": 0.006541772428657611,
+      "tolerance": 0.0654177242865761,
+      "ok": true
+    },
+    {
+      "scenario": "S5a",
+      "metric": "tc_total_variation",
+      "max_abs_diff": 0.3549577073069372,
+      "config": "K-MPC static",
+      "envelope": 1.811424861150158,
+      "tolerance": 18.11424861150158,
+      "ok": true
+    },
+    {
+      "scenario": "S5a",
+      "metric": "max_T",
+      "max_abs_diff": 8.936866606745753e-07,
+      "config": "linear MPC (OE)",
+      "envelope": 0.005345280365872895,
+      "tolerance": 0.05345280365872895,
+      "ok": true
+    },
+    {
+      "scenario": "S5a",
+      "metric": "ss_error",
+      "max_abs_diff": 7.260537741205116e-06,
+      "config": "K-MPC static",
+      "envelope": 0.00016869447852490443,
+      "tolerance": 0.0016869447852490443,
+      "ok": true
+    },
+    {
+      "scenario": "S6",
+      "metric": "iae_total",
+      "max_abs_diff": 3.2871325550409836e-08,
+      "config": "linear MPC (OE)",
+      "envelope": 5.3967329716186896e-08,
+      "tolerance": 5.39673297161869e-07,
+      "ok": true
+    },
+    {
+      "scenario": "S6",
+      "metric": "tc_total_variation",
+      "max_abs_diff": 0.00034296738164130147,
+      "config": "linear MPC (OE)",
+      "envelope": 0.00029477372072506114,
+      "tolerance": 0.0029477372072506114,
+      "ok": true
+    },
+    {
+      "scenario": "S6",
+      "metric": "max_T",
+      "max_abs_diff": 6.622340720241482e-07,
+      "config": "linear MPC (OE)",
+      "envelope": 5.839156642650778e-07,
+      "tolerance": 5.839156642650778e-06,
+      "ok": true
+    },
+    {
+      "scenario": "S6",
+      "metric": "ss_error",
+      "max_abs_diff": 3.962928041278957e-09,
+      "config": "linear MPC (OE)",
+      "envelope": 3.323087067672037e-09,
+      "tolerance": 3.323087067672037e-08,
+      "ok": true
+    }
+  ],
+  "printed": {
+    "S1 / iae_total": {
+      "n": 11,
+      "max_abs": 8.9748727005734e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.5574182122308526,
+        "candidate": 0.5574183019795796
+      }
+    },
+    "S1 / iae_total_on_measurement": {
+      "n": 11,
+      "max_abs": 7.969899262771918e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.6193934189071998,
+        "candidate": 0.6193934986061924
+      }
+    },
+    "S1 / max_T": {
+      "n": 10,
+      "max_abs": 2.2264026711127372e-07,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 325.1952168924597,
+        "candidate": 325.1952171151
+      }
+    },
+    "S1 / segments/iae": {
+      "n": 64,
+      "max_abs": 4.315234289342662e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.07868628127740038,
+        "candidate": 0.07868632442974327
+      }
+    },
+    "S1 / segments/overshoot": {
+      "n": 56,
+      "max_abs": 6.444764388824353e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0005006028356427938,
+        "candidate": 0.000500596390878405
+      }
+    },
+    "S1 / segments/overshoot_pct": {
+      "n": 57,
+      "max_abs": 1.3866375465187986e-05,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 1.077083111053258,
+        "candidate": 1.0770692446777927
+      }
+    },
+    "S1 / segments/ss_error": {
+      "n": 63,
+      "max_abs": 4.801999127111364e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0014184376571462587,
+        "candidate": 0.0014184328551471316
+      }
+    },
+    "S1 / segments/step": {
+      "n": 11,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": -0.04719282687371806,
+        "candidate": -0.04719282687371762
+      }
+    },
+    "S1 / tc_total_variation": {
+      "n": 11,
+      "max_abs": 0.000474601279165654,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 264.94320674453854,
+        "candidate": 264.9427321432594
+      }
+    },
+    "S2 / iae_total": {
+      "n": 10,
+      "max_abs": 1.6279405694319404e-07,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.12004602591766118,
+        "candidate": 0.12004586312360424
+      }
+    },
+    "S2 / iae_total_on_measurement": {
+      "n": 10,
+      "max_abs": 1.0059286292829484e-07,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.2625467272285045,
+        "candidate": 0.26254662663564154
+      }
+    },
+    "S2 / max_T": {
+      "n": 9,
+      "max_abs": 1.1002392739101197e-06,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 321.0275477448126,
+        "candidate": 321.0275466445733
+      }
+    },
+    "S2 / segments/iae": {
+      "n": 50,
+      "max_abs": 6.864962667080254e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0367100359186347,
+        "candidate": 0.03670996726900803
+      }
+    },
+    "S2 / segments/ss_error": {
+      "n": 50,
+      "max_abs": 5.474531104051467e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0024536024248508624,
+        "candidate": 0.0024535969503197584
+      }
+    },
+    "S2 / ss_error_max_abs_hold": {
+      "n": 10,
+      "max_abs": 5.474531104051467e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0024536024248508624,
+        "candidate": 0.0024535969503197584
+      }
+    },
+    "S2 / tc_total_variation": {
+      "n": 10,
+      "max_abs": 0.0008599434124221261,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 401.6220235268396,
+        "candidate": 401.6211635834272
+      }
+    },
+    "S3 / iae_total": {
+      "n": 10,
+      "max_abs": 0.0008247845879368332,
+      "example": {
+        "config": "PID",
+        "reference": 0.2771853274790223,
+        "candidate": 0.27801011206695914
+      }
+    },
+    "S3 / iae_total_on_measurement": {
+      "n": 10,
+      "max_abs": 0.0006867064635958098,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 1.0272749233172296,
+        "candidate": 1.0265882168536338
+      }
+    },
+    "S3 / max_T": {
+      "n": 9,
+      "max_abs": 3.0932732215660508e-06,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 322.2537481251374,
+        "candidate": 322.2537450318642
+      }
+    },
+    "S3 / segments/iae": {
+      "n": 100,
+      "max_abs": 0.0016388993260998408,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.05593320799390559,
+        "candidate": 0.05757210732000543
+      }
+    },
+    "S3 / segments/overshoot": {
+      "n": 96,
+      "max_abs": 0.00010410378640479667,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0009200556452207964,
+        "candidate": 0.001024159431625593
+      }
+    },
+    "S3 / segments/overshoot_pct": {
+      "n": 97,
+      "max_abs": 2.2445989182111212,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 19.8374715971088,
+        "candidate": 22.08207051531992
+      }
+    },
+    "S3 / segments/ss_error": {
+      "n": 96,
+      "max_abs": 0.00041564210052766,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0006053759309541995,
+        "candidate": 0.0010210180314818595
+      }
+    },
+    "S3 / segments/step": {
+      "n": 10,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": 0.009256293234211954,
+        "candidate": 0.009256293234212398
+      }
+    },
+    "S3 / tc_total_variation": {
+      "n": 10,
+      "max_abs": 1.3351574966852695,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 1266.8801341415576,
+        "candidate": 1268.215291638243
+      }
+    },
+    "S3 / n_flagged_rt": {
+      "n": 3,
+      "max_abs": 1,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 64,
+        "candidate": 63
+      }
+    },
+    "S4 / iae_total": {
+      "n": 12,
+      "max_abs": 2.564163548157694e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.1903055900330581,
+        "candidate": 0.19030556439142263
+      }
+    },
+    "S4 / iae_total_on_measurement": {
+      "n": 12,
+      "max_abs": 1.7824112630293598e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.22071732891864004,
+        "candidate": 0.2207173110945274
+      }
+    },
+    "S4 / max_T": {
+      "n": 11,
+      "max_abs": 1.6340007391590916e-06,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 323.65601157917547,
+        "candidate": 323.65600994517473
+      }
+    },
+    "S4 / segments/iae": {
+      "n": 36,
+      "max_abs": 2.745277413729319e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.06286314018413183,
+        "candidate": 0.0628631127313577
+      }
+    },
+    "S4 / segments/overshoot": {
+      "n": 36,
+      "max_abs": 5.234820799060458e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.0003788521923973054,
+        "candidate": 0.0003788469575765063
+      }
+    },
+    "S4 / segments/overshoot_pct": {
+      "n": 36,
+      "max_abs": 1.821315558592218e-05,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 1.3181146397879961,
+        "candidate": 1.3180964266324102
+      }
+    },
+    "S4 / segments/ss_error": {
+      "n": 36,
+      "max_abs": 1.7225110693266238e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.001544400916840003,
+        "candidate": 0.0015443991943289337
+      }
+    },
+    "S4 / segments/step": {
+      "n": 24,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": -0.028741975922385588,
+        "candidate": -0.028741975922385143
+      }
+    },
+    "S4 / segments/setpoint": {
+      "n": 12,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": 0.919713340978654,
+        "candidate": 0.9197133409786535
+      }
+    },
+    "S4 / tc_total_variation": {
+      "n": 12,
+      "max_abs": 0.0004236024279293815,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 204.88168405595133,
+        "candidate": 204.8812604535234
+      }
+    },
+    "S4 / u_dev_from_no_spike_run/max_K": {
+      "n": 2,
+      "max_abs": 7.787548383930698e-12,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": 0.5471875273366322,
+        "candidate": 0.5471875273444198
+      }
+    },
+    "S4 / u_dev_from_no_spike_run/sum_K": {
+      "n": 2,
+      "max_abs": 1.7899992599268444e-10,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": 21.714546096833374,
+        "candidate": 21.714546097012374
+      }
+    },
+    "S5a / iae_total": {
+      "n": 12,
+      "max_abs": 0.0011589324535425938,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 1.5084285839582188,
+        "candidate": 1.5095875164117614
+      }
+    },
+    "S5a / iae_total_on_measurement": {
+      "n": 12,
+      "max_abs": 0.0006397199315588686,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 1.5636137568592823,
+        "candidate": 1.5642534767908411
+      }
+    },
+    "S5a / segments/iae": {
+      "n": 34,
+      "max_abs": 0.0011589324535899864,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 0.04371507193632197,
+        "candidate": 0.04487400438991196
+      }
+    },
+    "S5a / segments/step": {
+      "n": 12,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": -0.10369616291952877,
+        "candidate": -0.10369616291952832
+      }
+    },
+    "S5a / segments/ss_error": {
+      "n": 21,
+      "max_abs": 7.260537741205116e-06,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 0.0015851593198688229,
+        "candidate": 0.001592419857610028
+      }
+    },
+    "S5a / tc_total_variation": {
+      "n": 11,
+      "max_abs": 0.3549577073069372,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 14.413713551194064,
+        "candidate": 14.768671258501001
+      }
+    },
+    "S5a / max_T": {
+      "n": 7,
+      "max_abs": 8.936866606745753e-07,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 330.07285044740684,
+        "candidate": 330.0728513410935
+      }
+    },
+    "S5a / n_flagged_rt": {
+      "n": 1,
+      "max_abs": 5,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 32,
+        "candidate": 27
+      }
+    },
+    "S5a / share_at_upper_limit": {
+      "n": 1,
+      "max_abs": 0.009358288770053513,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 0.7740641711229946,
+        "candidate": 0.7647058823529411
+      }
+    },
+    "S5b / fallback_steps": {
+      "n": 4,
+      "max_abs": 8,
+      "example": {
+        "config": "K-MPC adaptive, anchored window, sign gate",
+        "reference": 14,
+        "candidate": 6
+      }
+    },
+    "S5b / iae_total": {
+      "n": 10,
+      "max_abs": 4.218106979148807,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 11.793686163168523,
+        "candidate": 7.575579184019716
+      }
+    },
+    "S5b / iae_total_on_measurement": {
+      "n": 10,
+      "max_abs": 4.231364733386698,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 11.823445974372769,
+        "candidate": 7.5920812409860705
+      }
+    },
+    "S5b / max_T": {
+      "n": 9,
+      "max_abs": 16.30358186088921,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 456.9256724484728,
+        "candidate": 473.22925430936203
+      }
+    },
+    "S5b / segments/iae": {
+      "n": 30,
+      "max_abs": 4.21810673791699,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 8.003771478591313,
+        "candidate": 3.7856647406743225
+      }
+    },
+    "S5b / segments/step": {
+      "n": 10,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": -0.10369616291952877,
+        "candidate": -0.10369616291952832
+      }
+    },
+    "S5b / segments/ss_error": {
+      "n": 22,
+      "max_abs": 0.6879497662362459,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": -0.6571362934132408,
+        "candidate": 0.030813472823005172
+      }
+    },
+    "S5b / statuses/maximum iterations reached": {
+      "n": 3,
+      "max_abs": Infinity,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": null,
+        "candidate": 1
+      }
+    },
+    "S5b / statuses/solved": {
+      "n": 4,
+      "max_abs": 8,
+      "example": {
+        "config": "K-MPC adaptive, anchored window, sign gate",
+        "reference": 734,
+        "candidate": 742
+      }
+    },
+    "S5b / tc_total_variation": {
+      "n": 10,
+      "max_abs": 37.55359299547803,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 180.1791917676511,
+        "candidate": 142.62559877217308
+      }
+    },
+    "S5b / n_flagged_rt": {
+      "n": 6,
+      "max_abs": 16,
+      "example": {
+        "config": "K-MPC static",
+        "reference": 84,
+        "candidate": 100
+      }
+    },
+    "S5b / share_at_lower_limit": {
+      "n": 6,
+      "max_abs": 0.03342245989304812,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 0.0962566844919786,
+        "candidate": 0.12967914438502673
+      }
+    },
+    "S5b / share_at_upper_limit": {
+      "n": 5,
+      "max_abs": 0.03877005347593582,
+      "example": {
+        "config": "K-MPC adaptive, anchored window, sign gate",
+        "reference": 0.40106951871657753,
+        "candidate": 0.43983957219251335
+      }
+    },
+    "S5b / share_not_normal": {
+      "n": 6,
+      "max_abs": 0.07754010695187166,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 0.2620320855614973,
+        "candidate": 0.18449197860962566
+      }
+    },
+    "S5b / statuses/solved inaccurate": {
+      "n": 2,
+      "max_abs": Infinity,
+      "example": {
+        "config": "K-MPC adaptive, sign gate",
+        "reference": 5,
+        "candidate": null
+      }
+    },
+    "S5b / statuses/slsqp: Positive directional derivative for linesearch": {
+      "n": 1,
+      "max_abs": 2,
+      "example": {
+        "config": "NMPC on the same KRR",
+        "reference": 16,
+        "candidate": 18
+      }
+    },
+    "S6 / iae_total": {
+      "n": 10,
+      "max_abs": 3.2871325550409836e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.5805404387759293,
+        "candidate": 0.5805404059046038
+      }
+    },
+    "S6 / iae_total_on_measurement": {
+      "n": 10,
+      "max_abs": 3.024011696606266e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.6219356321729597,
+        "candidate": 0.6219356019328427
+      }
+    },
+    "S6 / max_T": {
+      "n": 5,
+      "max_abs": 6.622340720241482e-07,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 325.4910506958825,
+        "candidate": 325.4910513581166
+      }
+    },
+    "S6 / segments/iae": {
+      "n": 40,
+      "max_abs": 4.521314582450753e-08,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.059822171682138096,
+        "candidate": 0.05982221689528392
+      }
+    },
+    "S6 / segments/step": {
+      "n": 40,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": 0.03374994418786503,
+        "candidate": 0.03374994418786548
+      }
+    },
+    "S6 / segments/overshoot": {
+      "n": 19,
+      "max_abs": 4.688812671460596e-10,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.00017657946992266638,
+        "candidate": 0.00017657900104139923
+      }
+    },
+    "S6 / segments/overshoot_pct": {
+      "n": 19,
+      "max_abs": 7.627130862997156e-07,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.2872357722147432,
+        "candidate": 0.2872350095016569
+      }
+    },
+    "S6 / segments/setpoint": {
+      "n": 20,
+      "max_abs": 4.440892098500626e-16,
+      "example": {
+        "config": "K-MPC adaptive",
+        "reference": 0.919713340978654,
+        "candidate": 0.9197133409786535
+      }
+    },
+    "S6 / segments/ss_error": {
+      "n": 30,
+      "max_abs": 3.962928041278957e-09,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 0.010426964494659652,
+        "candidate": 0.010426960531731611
+      }
+    },
+    "S6 / tc_total_variation": {
+      "n": 10,
+      "max_abs": 0.00034296738164130147,
+      "example": {
+        "config": "linear MPC (OE)",
+        "reference": 132.69161515051462,
+        "candidate": 132.69127218313298
+      }
+    }
+  },
+  "reference": {
+    "machine": {
+      "platform": "Linux-6.18.44-fc-v114-x86_64-with-glibc2.39",
+      "processor": "x86_64",
+      "python": "3.13.16",
+      "blas_threads": 1,
+      "workers": 2
+    },
+    "startup_block_sha256_16": "284ba1b7775c1e39"
+  },
+  "candidate": {
+    "machine": {
+      "platform": "Windows-11-10.0.26100-SP0",
+      "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+      "python": "3.13.7",
+      "blas_threads": 1,
+      "workers": 2
+    },
+    "provenance": {
+      "code_sha256_16": "73b3e5c8823c3091",
+      "git": {
+        "commit": "3e3adaad9bbf157df626a34f36f1b8d2f93e924e",
+        "run_files_modified": false
+      },
+      "runs_computed": 75,
+      "runs_from_cache": 0,
+      "cached_runs": []
+    },
+    "startup_block_sha256_16": "ea7e8f8e7217fb8a",
+    "tc_max_diff": 0.0
+  },
+  "note": "numpy 2.5.3, scipy 1.18.1, scikit-learn 1.9.1, osqp 1.1.3, pandas 3.0.5 (requirements.txt; reported by the user), 15.10.2026"
+}
