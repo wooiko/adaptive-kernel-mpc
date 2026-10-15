@@ -50,4 +50,9 @@ caught    tie_exact             report_mpc.py  pairs: ties by exact equality (au
 caught    fingerprint_no_settings  run_mpc.py    provenance: frozen settings left out of the code fingerprint (audit 1, C1)
 caught    diag_den_ignored      diagnose_offset.py  S0 diagnostic: gain without the check of 1 - a1 - a2 (audit 1, N3)
 caught    tune_ss_ignored       run_mpc.py    tuning: steady-state limit ignored in the selection
-51 of 51 caught
+caught    ref_ignition_free     check_reference_run.py  reference run: ignition not compared exactly (D16)
+caught    ref_factor_ignored    check_reference_run.py  reference run: tolerance factor ignored (D16)
+caught    ref_none_unpaired     check_reference_run.py  reference run: None paired with a number (D16)
+caught    ref_s5b_bounded       check_reference_run.py  reference run: S5b under the tolerance (D16)
+caught    ref_time_printed      check_reference_run.py  reference run: time fields compared (D16)
+56 of 56 caught

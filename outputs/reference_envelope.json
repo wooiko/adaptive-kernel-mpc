@@ -1,0 +1,55 @@
+{
+  "rule": "TZ 14, D16",
+  "note": "seed 0, code 3e3adaa, cloud machine of outputs/mpc_metrics.json; probes: OPENBLAS_CORETYPE=Haswell and =Prescott (OpenBLAS selects Katmai kernels) instead of the default SkylakeX; python run_mpc.py, 14.10.2026",
+  "reference_startup_block": "284ba1b7775c1e39",
+  "probes": [
+    {
+      "file": "probe_openblas_haswell.json",
+      "startup_block_sha256_16": "6b83711207564408",
+      "code_sha256_16": "73b3e5c8823c3091"
+    },
+    {
+      "file": "probe_openblas_prescott.json",
+      "startup_block_sha256_16": "46c05c6dc82913fe",
+      "code_sha256_16": "73b3e5c8823c3091"
+    }
+  ],
+  "envelope": {
+    "S1": {
+      "iae_total": 2.8584206668291756e-08,
+      "tc_total_variation": 0.00041355879534421547,
+      "max_T": 2.6309908207622357e-07,
+      "ss_error": 3.8613720244277255e-09
+    },
+    "S2": {
+      "iae_total": 1.6138625476280755e-07,
+      "tc_total_variation": 0.0007456746873231168,
+      "max_T": 9.646744274505181e-07,
+      "ss_error": 4.760450545045203e-09
+    },
+    "S3": {
+      "iae_total": 0.0008247845879450488,
+      "tc_total_variation": 1.3401098497349722,
+      "max_T": 2.6768410634758766e-06,
+      "ss_error": 0.000415646758220689
+    },
+    "S4": {
+      "iae_total": 5.0169011639455974e-08,
+      "tc_total_variation": 0.00036637258511973414,
+      "max_T": 7.336431622206874e-07,
+      "ss_error": 1.926067485407204e-09
+    },
+    "S5a": {
+      "iae_total": 0.006541772428657611,
+      "tc_total_variation": 1.811424861150158,
+      "max_T": 0.005345280365872895,
+      "ss_error": 0.00016869447852490443
+    },
+    "S6": {
+      "iae_total": 5.3967329716186896e-08,
+      "tc_total_variation": 0.00029477372072506114,
+      "max_T": 5.839156642650778e-07,
+      "ss_error": 3.323087067672037e-09
+    }
+  }
+}

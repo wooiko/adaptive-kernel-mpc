@@ -1290,3 +1290,89 @@ class OffsetDiagnostic(unittest.TestCase):
         rows = np.array([[10, -0.01, -0.02, 1.0], [20, np.nan, -0.02, 1.0], [30, 0.01, -0.02, 1.0],
                          [40, -0.02, -0.02, 1.0]])
         self.assertAlmostEqual(do.wrong_share(rows), 1 / 3, places=12)
+
+
+class ReferenceRunCheck(unittest.TestCase):
+    """TZ 10, D16: comparison of a reference run on a second machine with outputs/mpc_metrics.json. Mutations:
+    ignition not compared, tolerance factor ignored, None paired with a number, S5b bounded, time fields printed."""
+    @classmethod
+    def setUpClass(cls):
+        import copy
+        import check_reference_run as crr
+        root = Path(__file__).resolve().parents[1] / "outputs"
+        cls.crr, cls.copy = crr, staticmethod(copy.deepcopy)
+        cls.ref = json.loads((root / "mpc_metrics.json").read_text())
+        cls.env = json.loads((root / "reference_envelope.json").read_text())["envelope"]
+
+    def run_check(self, cand):
+        return self.crr.check(self.ref, cand, self.env)
+
+    def test_identical_and_time_fields(self):
+        c = self.copy(self.ref)
+        c["wall_s_total"] += 100.0
+        c["machine"] = {"platform": "Windows"}
+        for sc in c["results"].values():
+            for m in sc.values():
+                m["step_ms"]["p95"] *= 3.0
+                m["wall_s"] += 1.0
+        r = self.run_check(c)
+        self.assertTrue(r["passed"])
+        self.assertEqual(r["printed"], {})
+
+    def test_exact_checks(self):
+        cfg = next(iter(self.ref["results"]["S1"]))
+        for key, value in (("violations", 1), ("ignition", True)):
+            c = self.copy(self.ref)
+            c["results"]["S1"][cfg][key] = value
+            r = self.run_check(c)
+            self.assertFalse(r["passed"], key)
+            self.assertFalse(next(e for e in r["exact"] if e["check"] == f"same {key} in every run")["ok"])
+        c = self.copy(self.ref)
+        c["provenance"]["code_sha256_16"] = "0" * 16
+        self.assertFalse(self.run_check(c)["passed"])
+
+    def test_bounded_tolerance(self):
+        cfg = next(iter(self.ref["results"]["S3"]))
+        tol = self.crr.FACTOR * self.env["S3"]["iae_total"]
+        for k, ok in ((0.5, True), (2.0, False)):
+            c = self.copy(self.ref)
+            c["results"]["S3"][cfg]["iae_total"] += k * tol
+            self.assertEqual(self.run_check(c)["passed"], ok, k)
+
+    def test_none_must_pair_with_none(self):
+        cfg = next(iter(self.ref["results"]["S1"]))
+        self.assertIsNotNone(self.ref["results"]["S1"][cfg]["segments"][0]["ss_error"])
+        c = self.copy(self.ref)
+        c["results"]["S1"][cfg]["segments"][0]["ss_error"] = None
+        self.assertFalse(self.run_check(c)["passed"])
+        self.assertEqual(self.crr.max_abs_diff([None, 1.0], [None, 1.5]), 0.5)
+
+    def test_outside_set_and_fallback_printed_only(self):
+        c = self.copy(self.ref)
+        for m in c["results"]["S5b"].values():
+            m["iae_total"] *= 2.0
+            m["fallback_steps"] += 5
+        for m in c["results"]["S1"].values():
+            m["fallback_steps"] += 1
+        r = self.run_check(c)
+        self.assertTrue(r["passed"])
+        self.assertIn("S5b / iae_total", r["printed"])
+        self.assertIn("S1 / fallback_steps", r["printed"])
+
+    def test_envelope_is_largest_difference(self):
+        p = self.copy(self.ref)
+        cfgs = list(p["results"]["S2"])
+        p["results"]["S2"][cfgs[0]]["max_T"] += 1e-3
+        p["results"]["S2"][cfgs[1]]["max_T"] -= 4e-3
+        env = self.crr.envelope(self.ref, [self.ref, p])
+        self.assertAlmostEqual(env["S2"]["max_T"], 4e-3, delta=1e-9)
+        self.assertEqual(env["S1"]["max_T"], 0.0)
+
+    def test_report_line(self):
+        import report_mpc as rp
+        r = self.run_check(self.copy(self.ref))
+        self.assertIn("passed by rule TZ 14, D16", rp.second_machine_text(r))
+        self.assertIn(f"exact checks {len(r['exact'])} of {len(r['exact'])}", rp.second_machine_text(r))
+        c = self.copy(self.ref)
+        c["results"]["S1"][next(iter(c["results"]["S1"]))]["violations"] = 1
+        self.assertIn("**not passed**", rp.second_machine_text(self.run_check(c)))
