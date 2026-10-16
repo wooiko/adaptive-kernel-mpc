@@ -33,6 +33,8 @@ caught    learn_window_short    closed_loop.py  excitation window: one sample sh
 caught    learning_ignored      adaptive.py   excitation window: learning flag ignored
 caught    r2_last_rows          run_mpc.py    initial window from the last rows of the record
 caught    readme_number_edit    README.md     README: a number of the Part 2 table edited by hand
+caught    readme_intro_edit     README.md     README: a number of the introduction edited by hand
+caught    intro_ratio_inverted  report_mpc.py  README introduction: OE / kernel ratio inverted
 caught    plan_unshifted        mpc.py        supervisor: controller's plan not shifted by one step
 caught    viol_rate_dropped     closed_loop.py  metrics: moves above du_max not counted as violations
 caught    ignition_last_T       closed_loop.py  metrics: ignition judged on the last T instead of the highest
@@ -55,4 +57,4 @@ caught    ref_factor_ignored    check_reference_run.py  reference run: tolerance
 caught    ref_none_unpaired     check_reference_run.py  reference run: None paired with a number (D16)
 caught    ref_s5b_bounded       check_reference_run.py  reference run: S5b under the tolerance (D16)
 caught    ref_time_printed      check_reference_run.py  reference run: time fields compared (D16)
-56 of 56 caught
+58 of 58 caught

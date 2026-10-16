@@ -1062,7 +1062,7 @@ class SeedResults(unittest.TestCase):
 
 
 class ReadmeNumbers(unittest.TestCase):
-    """P4. Mutation: a number of the Part 2 section of README.md edited by hand."""
+    """P4. Mutations: a number of the Part 2 section or of the introduction of README.md edited by hand."""
     def test_section_matches_results(self):
         import report_mpc as rp
         S, R0, *_ = rp.load()
@@ -1079,6 +1079,16 @@ class ReadmeNumbers(unittest.TestCase):
         for conf, cell in zip(rp.README_CONFS, cells):
             v = [S["by_seed"][s]["results"]["S1"][conf]["iae_total"] for s in S["by_seed"]]
             self.assertEqual(cell, f"{np.median(v):.4f}", conf)
+
+    def test_intro_values_from_json_directly(self):
+        import json
+        import report_mpc as rp
+        p1 = json.loads((OUT / "seeds.json").read_text())["per_seed"]
+        text = rp.README.read_text(encoding="utf-8")
+        intro = text[text.index(rp.INTRO_START):text.index(rp.INTRO_END)]
+        oe, arx = (np.median([x[k] for x in p1]) for k in ("oe_over_krr", "arx_over_krr"))
+        self.assertIn(f"{oe:.2f} times lower than the best linear model (OE) and {arx:.2f} times lower than ARX", intro)
+        self.assertTrue(text.startswith(rp.INTRO_START), "the introduction must open README.md")
 
 
 class GainSign(unittest.TestCase):
